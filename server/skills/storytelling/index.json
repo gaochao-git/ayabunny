@@ -1,0 +1,8 @@
+{
+  "id": "storytelling",
+  "name": "讲故事",
+  "description": "为小朋友讲各种有趣的故事",
+  "icon": "📖",
+  "version": "1.0.0",
+  "tools": ["tell_story", "list_stories"]
+}
