@@ -103,9 +103,10 @@ const canSend = computed(() => inputText.value.trim() && !chat.isLoading.value)
 const statusText = computed(() => {
   if (isInCall.value) {
     if (callRecorder.isRecording.value) return '正在听...'
-    if (ttsPlayer.isPlaying.value) return '正在说...'
+    if (ttsPlayer.isPlaying.value || ttsPlayer.isPending.value) return '正在说...'
     if (chat.isLoading.value) return '思考中...'
-    return '通话中'
+    if (isProcessingCall.value) return '处理中...'
+    return '等待说话...'
   }
   return '点击开始对话'
 })

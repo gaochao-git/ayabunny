@@ -48,7 +48,8 @@ export function useVAD(options: VADOptions = {}) {
 
   let audioContext: AudioContext | null = null
   let analyser: AnalyserNode | null = null
-  let mediaStream: MediaStream | null = null
+  let mediaStream: MediaStream | null = null       // 用于 VAD 监听
+  let recordStream: MediaStream | null = null      // 用于唤醒词录音（独立流，启动时创建）
   let animationFrame: number | null = null
 
   // 打断检测状态
@@ -64,7 +65,15 @@ export function useVAD(options: VADOptions = {}) {
    */
   async function start(): Promise<void> {
     try {
+      // 获取两个独立的 MediaStream：一个用于监听，一个用于录音
+      // 这样录音时不会影响监听，也不会在录音时请求新权限导致音频中断
       mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true })
+
+      // 如果启用了唤醒词模式，预先创建录音用的 MediaStream
+      if (allWakeWords.length > 0 && transcribeFn) {
+        recordStream = await navigator.mediaDevices.getUserMedia({ audio: true })
+        console.log('[VAD] Record stream ready for wake word detection')
+      }
 
       audioContext = new AudioContext()
       analyser = audioContext.createAnalyser()
@@ -107,6 +116,11 @@ export function useVAD(options: VADOptions = {}) {
       mediaStream = null
     }
 
+    if (recordStream) {
+      recordStream.getTracks().forEach((track) => track.stop())
+      recordStream = null
+    }
+
     if (audioContext) {
       audioContext.close()
       audioContext = null
@@ -122,66 +136,74 @@ export function useVAD(options: VADOptions = {}) {
   }
 
   /**
-   * 开始唤醒词录音检测
+   * 开始唤醒词录音检测（使用预先创建的 recordStream，不请求新权限）
    */
   async function startWakeWordDetection(): Promise<void> {
-    if (!mediaStream || !transcribeFn || isCheckingWakeWord.value) return
+    if (!transcribeFn || !recordStream || isCheckingWakeWord.value) return
 
     isCheckingWakeWord.value = true
     wakeWordChunks = []
-
     console.log('[VAD] Starting wake word detection...')
 
-    // 创建新的 MediaRecorder
-    wakeWordRecorder = new MediaRecorder(mediaStream, {
-      mimeType: 'audio/webm;codecs=opus',
-    })
+    try {
+      // 使用预先创建的 recordStream，不请求新权限，避免音频中断
+      wakeWordRecorder = new MediaRecorder(recordStream, {
+        mimeType: 'audio/webm;codecs=opus',
+      })
 
-    wakeWordRecorder.ondataavailable = (event) => {
-      if (event.data.size > 0) {
-        wakeWordChunks.push(event.data)
-      }
-    }
-
-    wakeWordRecorder.onstop = async () => {
-      if (wakeWordChunks.length === 0) {
-        isCheckingWakeWord.value = false
-        return
-      }
-
-      const audioBlob = new Blob(wakeWordChunks, { type: 'audio/webm' })
-      console.log('[VAD] Wake word audio recorded:', audioBlob.size, 'bytes')
-
-      try {
-        const text = await transcribeFn(audioBlob)
-        console.log('[VAD] Wake word ASR result:', text)
-
-        // 检查是否包含任意一个唤醒词
-        const detectedWord = allWakeWords.find(word => text && text.includes(word))
-        if (detectedWord) {
-          console.log('[VAD] Wake word detected:', detectedWord)
-          onWakeWordDetected?.()
-          onSpeechStart?.()
-        } else {
-          console.log('[VAD] Wake word not found in:', text)
+      wakeWordRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          wakeWordChunks.push(event.data)
         }
-      } catch (error) {
-        console.error('[VAD] Wake word ASR error:', error)
-      } finally {
-        isCheckingWakeWord.value = false
-        wakeWordRecorder = null
       }
+
+      wakeWordRecorder.onstop = () => {
+        if (wakeWordChunks.length === 0) {
+          isCheckingWakeWord.value = false
+          return
+        }
+
+        const audioBlob = new Blob(wakeWordChunks, { type: 'audio/webm' })
+        console.log('[VAD] Wake word audio recorded:', audioBlob.size, 'bytes')
+
+        // 异步处理 ASR，不阻塞主线程
+        setTimeout(async () => {
+          try {
+            const text = await transcribeFn(audioBlob)
+            console.log('[VAD] Wake word ASR result:', text)
+
+            // 检查是否包含任意一个唤醒词
+            const detectedWord = allWakeWords.find(word => text && text.includes(word))
+            if (detectedWord) {
+              console.log('[VAD] Wake word detected:', detectedWord)
+              onWakeWordDetected?.()
+              onSpeechStart?.()
+            } else {
+              console.log('[VAD] Wake word not found in:', text)
+            }
+          } catch (error) {
+            console.error('[VAD] Wake word ASR error:', error)
+          } finally {
+            isCheckingWakeWord.value = false
+            wakeWordRecorder = null
+          }
+        }, 0)
+      }
+
+      // 开始录音
+      wakeWordRecorder.start(100)
+
+      // 设置超时停止录音
+      setTimeout(() => {
+        if (wakeWordRecorder && wakeWordRecorder.state === 'recording') {
+          wakeWordRecorder.stop()
+        }
+      }, wakeWordTimeout)
+
+    } catch (error) {
+      console.error('[VAD] Failed to start wake word detection:', error)
+      isCheckingWakeWord.value = false
     }
-
-    // 开始录音
-    wakeWordRecorder.start(100)
-
-    // 设置超时停止录音
-    setTimeout(() => {
-      if (wakeWordRecorder && wakeWordRecorder.state === 'recording') {
-        wakeWordRecorder.stop()
-      }
-    }, wakeWordTimeout)
   }
 
   /**
