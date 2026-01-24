@@ -2,6 +2,8 @@
  * ASR 语音识别 API
  */
 
+import { useSettingsStore, type ASRService } from '@/stores/settings'
+
 export interface ASRResult {
   success: boolean
   text: string
@@ -12,15 +14,28 @@ export interface ASRResult {
   }>
 }
 
+// ASR 服务端点配置
+const ASR_ENDPOINTS: Record<ASRService, string> = {
+  funasr: '/api/asr/transcribe',
+  whisper: '/api/asr/whisper/transcribe',
+}
+
 /**
  * 语音转文字
  */
-export async function transcribe(audioBlob: Blob): Promise<ASRResult> {
+export async function transcribe(audioBlob: Blob, service?: ASRService): Promise<ASRResult> {
+  // 获取当前设置的 ASR 服务
+  const settings = useSettingsStore()
+  const asrService = service ?? settings.asrService
+  const endpoint = ASR_ENDPOINTS[asrService]
+
   const formData = new FormData()
   // 使用正确的文件扩展名（与录音格式 webm 匹配）
   formData.append('audio', audioBlob, 'recording.webm')
 
-  const response = await fetch('/api/asr/transcribe', {
+  console.log(`[ASR] 使用 ${asrService} 服务: ${endpoint}`)
+
+  const response = await fetch(endpoint, {
     method: 'POST',
     body: formData,
   })

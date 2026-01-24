@@ -1,16 +1,23 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useChat } from '@/composables/useChat'
 import { useAudioRecorder } from '@/composables/useAudioRecorder'
 import { useTTSPlayer } from '@/composables/useTTSPlayer'
 import { useVAD } from '@/composables/useVAD'
+import { useWebRTCVAD } from '@/composables/useWebRTCVAD'
+import { useSileroVAD } from '@/composables/useSileroVAD'
+import { useFunASRVAD } from '@/composables/useFunASRVAD'
 import { useSettingsStore } from '@/stores/settings'
 import { transcribe } from '@/api/asr'
 import ChatArea from '@/components/ChatArea.vue'
-import SettingsPanel from '@/components/SettingsPanel.vue'
+import RightPanel from '@/components/RightPanel.vue'
 
 const settings = useSettingsStore()
 const chat = useChat()
+
+// 用于前向引用的变量
+let startCallRecording: () => Promise<void>
+let ttsPlayer: ReturnType<typeof useTTSPlayer>
 
 // 状态
 const inputText = ref('')
@@ -20,14 +27,18 @@ const isTranscribing = ref(false) // 是否正在语音转文字
 const isProcessingCall = ref(false) // 是否正在处理通话（防止并发）
 
 // TTS 播放器
-const ttsPlayer = useTTSPlayer({
+ttsPlayer = useTTSPlayer({
   gain: () => settings.ttsGain,
   voice: () => settings.ttsVoice,
-  onPlayStart: () => {
+  onPlayStart: async () => {
     console.log('[TTS] 开始播放')
     // 通话中，播放时启动 VAD 检测打断
     if (settings.vadEnabled && isInCall.value) {
-      vad.start()
+      try {
+        await vad.start()
+      } catch (error) {
+        console.error('[VAD] 启动失败:', error)
+      }
     }
   },
   onPlayEnd: () => {
@@ -55,29 +66,105 @@ async function transcribeForWakeWord(blob: Blob): Promise<string> {
 // 唤醒词支持同音字：小智、小志、小知、乔治等
 const wakeWords = ['小智', '小志', '小知', '小之', '乔治']
 
-const vad = useVAD({
+// 通用的打断处理函数
+function handleVADSpeechStart() {
+  console.log('[VAD] 检测到用户说话，打断 TTS')
+  if (ttsPlayer.isPlaying.value) {
+    // 停止 TTS 播放（会清空队列）
+    ttsPlayer.stop()
+    // 延迟一点再开始录音，避免捕获 TTS 尾音
+    setTimeout(() => {
+      if (isInCall.value && !callRecorder.isRecording.value && !isProcessingCall.value) {
+        startCallRecording()
+      }
+    }, 200)
+  }
+}
+
+// 简单 VAD（基于音量阈值）
+const simpleVAD = useVAD({
   threshold: () => settings.vadThreshold,
   triggerCount: () => settings.vadTriggerCount,
   ignoreTime: () => settings.vadIgnoreTime,
-  wakeWords: wakeWords,          // 唤醒词列表（支持同音字）
-  wakeWordTimeout: 1500,         // 录音 1.5 秒
+  wakeWords: wakeWords,
+  wakeWordTimeout: 1500,
   transcribeFn: transcribeForWakeWord,
   onWakeWordDetected: () => {
-    console.log('[VAD] 唤醒词"小智"检测到！')
+    console.log('[SimpleVAD] 唤醒词"小智"检测到！')
   },
-  onSpeechStart: () => {
-    console.log('[VAD] 检测到用户说话，打断 TTS')
-    if (ttsPlayer.isPlaying.value) {
-      // 停止 TTS 播放（会清空队列）
-      ttsPlayer.stop()
-      // 延迟一点再开始录音，避免捕获 TTS 尾音
-      setTimeout(() => {
-        if (isInCall.value && !callRecorder.isRecording.value && !isProcessingCall.value) {
-          startCallRecording()
-        }
-      }, 200)
+  onSpeechStart: handleVADSpeechStart,
+})
+
+// WebRTC VAD（基于频谱分析）
+const webrtcVAD = useWebRTCVAD({
+  ignoreTime: () => settings.vadIgnoreTime,
+  onSpeechStart: handleVADSpeechStart,
+})
+
+// Silero VAD（基于前端 AI 模型）
+const sileroVAD = useSileroVAD({
+  wakeWords: wakeWords,
+  transcribeFn: transcribeForWakeWord,
+  ignoreTime: () => settings.vadIgnoreTime,
+  onWakeWordDetected: () => {
+    console.log('[SileroVAD] 唤醒词"小智"检测到！')
+  },
+  onSpeechStart: handleVADSpeechStart,
+})
+
+// FunASR VAD（基于服务端 AI 模型）
+const funasrVAD = useFunASRVAD({
+  wsUrl: 'ws://127.0.0.1:10096',  // FunASR 流式服务 WebSocket 地址
+  ignoreTime: () => settings.vadIgnoreTime,
+  onSpeechStart: handleVADSpeechStart,
+})
+
+// 统一 VAD 接口
+const vad = {
+  start: async () => {
+    if (settings.vadType === 'funasr') {
+      await funasrVAD.start()
+    } else if (settings.vadType === 'silero') {
+      await sileroVAD.start()
+    } else if (settings.vadType === 'webrtc') {
+      await webrtcVAD.start()
+    } else {
+      simpleVAD.start()
     }
   },
+  stop: () => {
+    simpleVAD.stop()
+    webrtcVAD.stop()
+    sileroVAD.stop()
+    funasrVAD.stop()
+  },
+  get isActive() {
+    if (settings.vadType === 'funasr') return funasrVAD.isActive
+    if (settings.vadType === 'silero') return sileroVAD.isActive
+    if (settings.vadType === 'webrtc') return webrtcVAD.isActive
+    return simpleVAD.isActive
+  },
+  get isSpeaking() {
+    if (settings.vadType === 'funasr') return funasrVAD.isSpeaking
+    if (settings.vadType === 'silero') return sileroVAD.isSpeaking
+    if (settings.vadType === 'webrtc') return webrtcVAD.isSpeaking
+    return simpleVAD.isSpeaking
+  },
+  get isLoading() {
+    return sileroVAD.isLoading || funasrVAD.isConnecting
+  },
+}
+
+// 监听 VAD 类型变化，切换时停止当前 VAD
+watch(() => settings.vadType, (newType, oldType) => {
+  if (newType !== oldType) {
+    console.log(`[VAD] 切换类型: ${oldType} -> ${newType}`)
+    // 停止所有 VAD
+    simpleVAD.stop()
+    webrtcVAD.stop()
+    sileroVAD.stop()
+    funasrVAD.stop()
+  }
 })
 
 // 通话录音器（带静音检测自动停止）
@@ -102,6 +189,7 @@ const canSend = computed(() => inputText.value.trim() && !chat.isLoading.value)
 // 状态文字
 const statusText = computed(() => {
   if (isInCall.value) {
+    if (sileroVAD.isLoading.value) return '加载VAD模型...'
     if (callRecorder.isRecording.value) return '正在听...'
     if (ttsPlayer.isPlaying.value || ttsPlayer.isPending.value) return '正在说...'
     if (chat.isLoading.value) return '思考中...'
@@ -185,7 +273,7 @@ function endCall() {
 }
 
 // 开始通话录音
-async function startCallRecording() {
+startCallRecording = async function() {
   // 防止重复开始录音
   if (callRecorder.isRecording.value) {
     console.log('[Call] 已在录音中，跳过')
@@ -275,9 +363,9 @@ function clearChat() {
 </script>
 
 <template>
-  <div class="min-h-screen cute-background flex items-center justify-center p-4 relative overflow-hidden">
-    <!-- 装饰性元素 -->
-    <div class="absolute inset-0 pointer-events-none overflow-hidden">
+  <div class="min-h-screen cute-background flex items-center justify-center p-0 md:p-4 relative overflow-hidden">
+    <!-- 装饰性元素（手机端隐藏） -->
+    <div class="hidden md:block absolute inset-0 pointer-events-none overflow-hidden">
       <!-- 星星 -->
       <div class="star" style="top: 15%; left: 15%; animation-delay: 0s;"></div>
       <div class="star" style="top: 25%; right: 20%; animation-delay: 1s;"></div>
@@ -294,32 +382,41 @@ function clearChat() {
       <div class="dot" style="top: 85%; left: 20%; background: #98FB98;"></div>
     </div>
 
-    <!-- 主卡片 -->
-    <div class="w-full max-w-lg bg-white rounded-3xl shadow-2xl overflow-hidden flex flex-col relative z-10" style="height: 85vh; max-height: 800px;">
-      <!-- 头部 -->
-      <header class="bg-gradient-to-r from-pink-400 via-pink-500 to-orange-400 px-5 py-4 flex items-center justify-between">
-        <div class="flex items-center gap-2">
-          <span class="text-white text-lg font-semibold">小智</span>
-        </div>
-        <div class="flex items-center gap-2">
-          <button
-            @click="clearChat"
-            class="px-3 py-1.5 bg-white/20 hover:bg-white/30 text-white text-sm rounded-lg transition-colors"
-          >
-            清空
-          </button>
-          <button
-            @click="showSettings = true"
-            class="p-1.5 bg-white/20 hover:bg-white/30 rounded-lg transition-colors"
-            title="设置"
-          >
-            <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-            </svg>
-          </button>
-        </div>
-      </header>
+    <!-- 主卡片容器 -->
+    <div
+      class="bg-white md:rounded-3xl shadow-2xl flex relative z-10 overflow-visible transition-all duration-300 w-full md:w-auto h-screen md:h-[85vh] md:max-h-[800px]"
+    >
+      <!-- 左侧：聊天区域 -->
+      <div
+        class="flex flex-col flex-shrink-0 w-full md:w-[420px]"
+        :class="{ 'hidden md:flex': showSettings }"
+      >
+        <!-- 头部 -->
+        <header class="bg-gradient-to-r from-pink-400 via-pink-500 to-orange-400 px-5 py-4 flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <span class="text-white text-lg font-semibold">小智</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <button
+              @click="clearChat"
+              class="px-3 py-1.5 bg-white/20 hover:bg-white/30 text-white text-sm rounded-lg transition-colors"
+            >
+              清空
+            </button>
+            <button
+              @click="showSettings = !showSettings"
+              :class="[
+                'p-1.5 rounded-lg transition-colors',
+                showSettings ? 'bg-white/40' : 'bg-white/20 hover:bg-white/30'
+              ]"
+              title="设置/故事"
+            >
+              <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
+            </button>
+          </div>
+        </header>
 
       <!-- 聊天区域 -->
       <ChatArea
@@ -467,14 +564,15 @@ function clearChat() {
           </div>
         </div>
       </footer>
-    </div>
+      </div>
 
-    <!-- 设置面板 -->
-    <SettingsPanel
-      :show="showSettings"
-      :audio-level="isInCall ? callRecorder.audioLevel.value : transcribeRecorder.audioLevel.value"
-      @close="showSettings = false"
-    />
+      <!-- 右侧：设置/故事面板 -->
+      <RightPanel
+        :show="showSettings"
+        :audio-level="isInCall ? callRecorder.audioLevel.value : transcribeRecorder.audioLevel.value"
+        @close="showSettings = false"
+      />
+    </div>
   </div>
 </template>
 

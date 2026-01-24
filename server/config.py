@@ -18,8 +18,8 @@ class Settings(BaseSettings):
 
     # LLM 配置
     OPENAI_API_KEY: str = ""
-    OPENAI_BASE_URL: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-    OPENAI_MODEL: str = "qwen-plus"
+    OPENAI_BASE_URL: str = "https://api.siliconflow.cn/v1"
+    OPENAI_MODEL: str = "Qwen/Qwen3-30B-A3B-Instruct-2507"
 
     # ASR 配置
     ASR_BASE_URL: str = "http://127.0.0.1:10095"

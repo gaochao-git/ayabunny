@@ -5,6 +5,22 @@
 import { defineStore } from 'pinia'
 import { ref, watch } from 'vue'
 
+// ASR 服务选项
+export const ASR_SERVICES = [
+  { id: 'funasr', name: 'FunASR', desc: '阿里达摩院，中文优化', port: 10095 },
+  { id: 'whisper', name: 'Whisper', desc: 'OpenAI，多语言支持', port: 8017 },
+] as const
+
+export type ASRService = typeof ASR_SERVICES[number]['id']
+
+// LLM 模型选项
+export const LLM_MODELS = [
+  { id: 'Qwen/Qwen3-30B-A3B-Instruct-2507', name: 'Qwen3-30B-A3B-Instruct', desc: '通义千问3 30B' },
+  { id: 'deepseek-ai/DeepSeek-V3', name: 'DeepSeek-V3', desc: 'DeepSeek 最新模型' },
+] as const
+
+export type LLMModel = typeof LLM_MODELS[number]['id']
+
 // TTS 音色选项
 export const TTS_VOICES = [
   { id: 'alex', name: 'Alex (男·稳重)' },
@@ -17,17 +33,29 @@ export const TTS_VOICES = [
   { id: 'diana', name: 'Diana (女·开朗)' },
 ]
 
+// VAD 类型选项
+export const VAD_TYPES = [
+  { id: 'simple', name: '简单音量检测', desc: '基于音量阈值，低延迟' },
+  { id: 'webrtc', name: 'WebRTC VAD', desc: '频谱分析，轻量准确' },
+  { id: 'silero', name: 'Silero VAD', desc: '前端AI模型' },
+  { id: 'funasr', name: 'FunASR VAD', desc: '服务端AI模型，最准确' },
+] as const
+
+export type VADType = typeof VAD_TYPES[number]['id']
+
 export const useSettingsStore = defineStore('settings', () => {
   // 从 localStorage 加载设置
   const stored = localStorage.getItem('voice-chat-settings')
   const initial = stored ? JSON.parse(stored) : {}
 
   // ========== ASR 语音识别 ==========
+  const asrService = ref<ASRService>(initial.asrService ?? 'funasr') // ASR 服务
   const silenceThreshold = ref(initial.silenceThreshold ?? 30)      // 静音阈值 (0-255)
   const silenceDuration = ref(initial.silenceDuration ?? 1500)      // 静音时长 (ms)
   const autoSend = ref(initial.autoSend ?? true)                    // 静音自动发送
 
   // ========== LLM 大语言模型 ==========
+  const llmModel = ref<LLMModel>(initial.llmModel ?? 'Qwen/Qwen3-30B-A3B-Instruct-2507')   // 模型选择
   const llmTemperature = ref(initial.llmTemperature ?? 0.7)         // 温度 (0-1.5)
   const llmMaxTokens = ref(initial.llmMaxTokens ?? 1500)            // 最大输出 (200-4000)
   const llmMaxHistory = ref(initial.llmMaxHistory ?? 20)            // 记忆轮数 (5-50)
@@ -39,18 +67,21 @@ export const useSettingsStore = defineStore('settings', () => {
 
   // ========== VAD 打断检测 ==========
   const vadEnabled = ref(initial.vadEnabled ?? true)                // 启用 VAD
-  const vadThreshold = ref(initial.vadThreshold ?? 60)              // 打断阈值 (10-80)
-  const vadTriggerCount = ref(initial.vadTriggerCount ?? 5)         // 触发次数 (2-10)
+  const vadType = ref<VADType>(initial.vadType ?? 'simple')         // VAD 类型
+  const vadThreshold = ref(initial.vadThreshold ?? 60)              // 打断阈值 (10-80)，仅简单模式
+  const vadTriggerCount = ref(initial.vadTriggerCount ?? 5)         // 触发次数 (2-10)，仅简单模式
   const vadIgnoreTime = ref(initial.vadIgnoreTime ?? 800)           // 忽略时间 (ms)
 
   // 保存设置
   function save(): void {
     const settings = {
       // ASR
+      asrService: asrService.value,
       silenceThreshold: silenceThreshold.value,
       silenceDuration: silenceDuration.value,
       autoSend: autoSend.value,
       // LLM
+      llmModel: llmModel.value,
       llmTemperature: llmTemperature.value,
       llmMaxTokens: llmMaxTokens.value,
       llmMaxHistory: llmMaxHistory.value,
@@ -60,6 +91,7 @@ export const useSettingsStore = defineStore('settings', () => {
       ttsGain: ttsGain.value,
       // VAD
       vadEnabled: vadEnabled.value,
+      vadType: vadType.value,
       vadThreshold: vadThreshold.value,
       vadTriggerCount: vadTriggerCount.value,
       vadIgnoreTime: vadIgnoreTime.value,
@@ -70,10 +102,10 @@ export const useSettingsStore = defineStore('settings', () => {
   // 监听变化自动保存
   watch(
     [
-      silenceThreshold, silenceDuration, autoSend,
-      llmTemperature, llmMaxTokens, llmMaxHistory,
+      asrService, silenceThreshold, silenceDuration, autoSend,
+      llmModel, llmTemperature, llmMaxTokens, llmMaxHistory,
       ttsEnabled, ttsVoice, ttsGain,
-      vadEnabled, vadThreshold, vadTriggerCount, vadIgnoreTime,
+      vadEnabled, vadType, vadThreshold, vadTriggerCount, vadIgnoreTime,
     ],
     save,
     { deep: true }
@@ -81,10 +113,12 @@ export const useSettingsStore = defineStore('settings', () => {
 
   return {
     // ASR
+    asrService,
     silenceThreshold,
     silenceDuration,
     autoSend,
     // LLM
+    llmModel,
     llmTemperature,
     llmMaxTokens,
     llmMaxHistory,
@@ -94,6 +128,7 @@ export const useSettingsStore = defineStore('settings', () => {
     ttsGain,
     // VAD
     vadEnabled,
+    vadType,
     vadThreshold,
     vadTriggerCount,
     vadIgnoreTime,

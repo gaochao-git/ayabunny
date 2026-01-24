@@ -22,6 +22,10 @@ class ChatRequest(BaseModel):
     message: str
     history: list[ChatMessage] = []
     thread_id: str | None = None
+    # LLM 参数
+    model: str | None = None
+    temperature: float | None = None
+    max_tokens: int | None = None
 
 
 def build_messages(message: str, history: list[ChatMessage]) -> list:
@@ -38,7 +42,10 @@ def build_messages(message: str, history: list[ChatMessage]) -> list:
 
 async def stream_agent_response(
     message: str,
-    history: list[ChatMessage]
+    history: list[ChatMessage],
+    model: str | None = None,
+    temperature: float | None = None,
+    max_tokens: int | None = None,
 ) -> AsyncGenerator[str, None]:
     """
     流式生成 Agent 响应
@@ -50,7 +57,7 @@ async def stream_agent_response(
     - done: 响应完成
     - error: 发生错误
     """
-    agent = get_agent()
+    agent = get_agent(model=model, temperature=temperature, max_tokens=max_tokens)
     messages = build_messages(message, history)
 
     try:
@@ -107,7 +114,13 @@ async def chat(request: ChatRequest):
         raise HTTPException(status_code=400, detail="消息不能为空")
 
     return StreamingResponse(
-        stream_agent_response(request.message, request.history),
+        stream_agent_response(
+            request.message,
+            request.history,
+            model=request.model,
+            temperature=request.temperature,
+            max_tokens=request.max_tokens,
+        ),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -127,7 +140,11 @@ async def chat_simple(request: ChatRequest):
     if not request.message.strip():
         raise HTTPException(status_code=400, detail="消息不能为空")
 
-    agent = get_agent()
+    agent = get_agent(
+        model=request.model,
+        temperature=request.temperature,
+        max_tokens=request.max_tokens,
+    )
     messages = build_messages(request.message, request.history)
 
     try:

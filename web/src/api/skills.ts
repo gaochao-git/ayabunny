@@ -142,3 +142,24 @@ export async function deleteStory(skillId: string, storyId: string): Promise<voi
     throw new Error(`HTTP error! status: ${response.status}`)
   }
 }
+
+/**
+ * 自动生成故事内容
+ */
+export async function generateStory(
+  skillId: string,
+  title: string
+): Promise<{ title: string; content: string }> {
+  const response = await fetch(`/api/skills/${skillId}/stories/generate`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ title }),
+  })
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}))
+    throw new Error(error.detail || `HTTP error! status: ${response.status}`)
+  }
+  return response.json()
+}

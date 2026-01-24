@@ -21,8 +21,8 @@ from .skills_loader import (
 
 settings = get_settings()
 
-# Agent 单例
-_agent: Any = None
+# Agent 缓存（按配置缓存）
+_agent_cache: dict[str, Any] = {}
 
 
 # 动态技能加载工具
@@ -80,15 +80,26 @@ def build_system_prompt() -> str:
 - 如果不确定用户意图，可以友好地询问"""
 
 
-def create_agent() -> Any:
-    """创建 LangGraph Agent"""
+def create_agent(
+    model: str | None = None,
+    temperature: float | None = None,
+    max_tokens: int | None = None,
+) -> Any:
+    """创建 LangGraph Agent
+
+    Args:
+        model: 模型名称，默认使用配置中的 OPENAI_MODEL
+        temperature: 温度参数，默认 0.7
+        max_tokens: 最大输出 token 数
+    """
     # 创建 LLM
     llm = ChatOpenAI(
-        model=settings.OPENAI_MODEL,
+        model=model or settings.OPENAI_MODEL,
         openai_api_key=settings.OPENAI_API_KEY,
         openai_api_base=settings.OPENAI_BASE_URL,
         streaming=True,
-        temperature=0.7,
+        temperature=temperature if temperature is not None else 0.7,
+        max_tokens=max_tokens,
     )
 
     # 定义工具：包含技能加载工具 + 各技能的具体工具
@@ -111,16 +122,31 @@ def create_agent() -> Any:
     return agent
 
 
-def get_agent() -> Any:
-    """获取 Agent 单例"""
-    global _agent
-    if _agent is None:
-        _agent = create_agent()
-    return _agent
+def get_agent(
+    model: str | None = None,
+    temperature: float | None = None,
+    max_tokens: int | None = None,
+) -> Any:
+    """获取 Agent（按配置缓存）
+
+    Args:
+        model: 模型名称
+        temperature: 温度参数
+        max_tokens: 最大输出 token 数
+    """
+    global _agent_cache
+
+    # 构建缓存键
+    cache_key = f"{model or 'default'}:{temperature}:{max_tokens}"
+
+    if cache_key not in _agent_cache:
+        _agent_cache[cache_key] = create_agent(model, temperature, max_tokens)
+
+    return _agent_cache[cache_key]
 
 
 def reload_agent() -> Any:
-    """重新加载 Agent（技能更新后调用）"""
-    global _agent
-    _agent = create_agent()
-    return _agent
+    """重新加载所有 Agent（技能更新后调用）"""
+    global _agent_cache
+    _agent_cache.clear()
+    return get_agent()

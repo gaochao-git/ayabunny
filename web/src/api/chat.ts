@@ -16,19 +16,32 @@ export interface ChatEvent {
   message?: string
 }
 
+export interface ChatOptions {
+  model?: string
+  temperature?: number
+  maxTokens?: number
+}
+
 /**
  * 发送聊天消息（SSE 流式）
  */
 export async function* streamChat(
   message: string,
-  history: ChatMessage[] = []
+  history: ChatMessage[] = [],
+  options: ChatOptions = {}
 ): AsyncGenerator<ChatEvent> {
   const response = await fetch('/api/chat', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ message, history }),
+    body: JSON.stringify({
+      message,
+      history,
+      model: options.model,
+      temperature: options.temperature,
+      max_tokens: options.maxTokens,
+    }),
   })
 
   if (!response.ok) {
@@ -69,14 +82,21 @@ export async function* streamChat(
  */
 export async function sendChat(
   message: string,
-  history: ChatMessage[] = []
+  history: ChatMessage[] = [],
+  options: ChatOptions = {}
 ): Promise<string> {
   const response = await fetch('/api/chat/simple', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ message, history }),
+    body: JSON.stringify({
+      message,
+      history,
+      model: options.model,
+      temperature: options.temperature,
+      max_tokens: options.maxTokens,
+    }),
   })
 
   if (!response.ok) {

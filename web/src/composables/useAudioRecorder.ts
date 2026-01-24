@@ -23,6 +23,13 @@ function getOptionValue<T>(option: T | (() => T) | undefined, defaultValue: T): 
   return option
 }
 
+// 音频约束：启用回声消除、降噪、自动增益
+const audioConstraints: MediaTrackConstraints = {
+  echoCancellation: true,   // 回声消除（过滤扬声器声音）
+  noiseSuppression: true,   // 降噪
+  autoGainControl: true,    // 自动增益
+}
+
 export function useAudioRecorder(options: AudioRecorderOptions = {}) {
   const { onSilenceDetected } = options
 
@@ -47,7 +54,8 @@ export function useAudioRecorder(options: AudioRecorderOptions = {}) {
    */
   async function startRecording(): Promise<void> {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      // 启用回声消除，避免录到 TTS 播放的声音
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints })
 
       // 设置音频分析
       audioContext = new AudioContext()

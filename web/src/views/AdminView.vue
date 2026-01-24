@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { getStories, createStory, updateStory, deleteStory, type Story } from '@/api/skills'
+import { getStories, createStory, updateStory, deleteStory, generateStory, type Story } from '@/api/skills'
 
 const SKILL_ID = 'storytelling'
 
@@ -9,6 +9,7 @@ const stories = ref<Story[]>([])
 const isLoading = ref(false)
 const showEditor = ref(false)
 const editingStory = ref<Story | null>(null)
+const isGenerating = ref(false)
 
 // 表单数据
 const form = ref({
@@ -89,6 +90,25 @@ async function handleDelete(story: Story) {
   } catch (error) {
     console.error('Failed to delete story:', error)
     alert('删除失败')
+  }
+}
+
+// 自动生成故事内容
+async function handleGenerate() {
+  if (!form.value.title.trim()) {
+    alert('请先输入故事名称')
+    return
+  }
+
+  isGenerating.value = true
+  try {
+    const result = await generateStory(SKILL_ID, form.value.title.trim())
+    form.value.content = result.content
+  } catch (error: any) {
+    console.error('Failed to generate story:', error)
+    alert('生成失败: ' + (error.message || '未知错误'))
+  } finally {
+    isGenerating.value = false
   }
 }
 
@@ -213,12 +233,28 @@ onMounted(loadStories)
             <div class="flex-1 overflow-y-auto p-4 space-y-4">
               <div>
                 <label class="block text-sm font-medium text-gray-700 mb-1">标题</label>
-                <input
-                  v-model="form.title"
-                  type="text"
-                  placeholder="故事标题"
-                  class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
-                />
+                <div class="flex gap-2">
+                  <input
+                    v-model="form.title"
+                    type="text"
+                    placeholder="输入故事名称，如：白雪公主"
+                    class="flex-1 px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    :disabled="isGenerating"
+                  />
+                  <button
+                    v-if="!editingStory"
+                    @click="handleGenerate"
+                    :disabled="isGenerating || !form.title.trim()"
+                    class="px-4 py-2 bg-green-500 hover:bg-green-600 disabled:bg-gray-300 text-white rounded-lg transition-colors whitespace-nowrap flex items-center gap-2"
+                  >
+                    <svg v-if="isGenerating" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                      <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                      <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    <span>{{ isGenerating ? '生成中...' : '自动获取' }}</span>
+                  </button>
+                </div>
+                <p v-if="!editingStory" class="text-xs text-gray-400 mt-1">输入故事名称后点击"自动获取"，AI 会自动生成故事内容</p>
               </div>
 
               <div>
@@ -228,6 +264,7 @@ onMounted(loadStories)
                   placeholder="故事内容（支持 Markdown 格式）"
                   rows="12"
                   class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 resize-none font-mono text-sm"
+                  :disabled="isGenerating"
                 ></textarea>
               </div>
             </div>

@@ -22,6 +22,13 @@ export interface VADOptions {
   onWakeWordDetected?: () => void          // 唤醒词检测到时回调
 }
 
+// 音频约束：启用回声消除、降噪、自动增益
+const audioConstraints: MediaTrackConstraints = {
+  echoCancellation: true,   // 回声消除（过滤扬声器声音）
+  noiseSuppression: true,   // 降噪
+  autoGainControl: true,    // 自动增益
+}
+
 // 获取选项值（支持函数或直接值）
 function getOptionValue<T>(option: T | (() => T) | undefined, defaultValue: T): T {
   if (option === undefined) return defaultValue
@@ -66,13 +73,13 @@ export function useVAD(options: VADOptions = {}) {
   async function start(): Promise<void> {
     try {
       // 获取两个独立的 MediaStream：一个用于监听，一个用于录音
-      // 这样录音时不会影响监听，也不会在录音时请求新权限导致音频中断
-      mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      // 启用回声消除，避免麦克风拾取扬声器声音导致误触发
+      mediaStream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints })
 
       // 如果启用了唤醒词模式，预先创建录音用的 MediaStream
       if (allWakeWords.length > 0 && transcribeFn) {
-        recordStream = await navigator.mediaDevices.getUserMedia({ audio: true })
-        console.log('[VAD] Record stream ready for wake word detection')
+        recordStream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints })
+        console.log('[VAD] Record stream ready for wake word detection (echo cancellation enabled)')
       }
 
       audioContext = new AudioContext()

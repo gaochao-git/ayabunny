@@ -3,7 +3,8 @@
  */
 
 import { ref, computed } from 'vue'
-import { streamChat, type ChatMessage, type ChatEvent } from '@/api/chat'
+import { streamChat, type ChatMessage, type ChatEvent, type ChatOptions } from '@/api/chat'
+import { useSettingsStore } from '@/stores/settings'
 
 export interface Message extends ChatMessage {
   id: string
@@ -67,6 +68,14 @@ export function useChat() {
   async function send(content: string, onSentence?: (sentence: string) => void): Promise<string> {
     if (isLoading.value) return ''
 
+    // 获取 LLM 设置
+    const settings = useSettingsStore()
+    const chatOptions: ChatOptions = {
+      model: settings.llmModel,
+      temperature: settings.llmTemperature,
+      maxTokens: settings.llmMaxTokens,
+    }
+
     // 添加用户消息
     addUserMessage(content)
 
@@ -82,7 +91,7 @@ export function useChat() {
 
     try {
       // 流式获取响应
-      for await (const event of streamChat(content, history.value.slice(0, -1))) {
+      for await (const event of streamChat(content, history.value.slice(0, -1), chatOptions)) {
         handleEvent(event)
 
         if (event.type === 'token' && event.content) {

@@ -14,11 +14,11 @@ if [ ! -d "$VENV_DIR" ]; then
     exit 1
 fi
 
-# 停止所有服务
+# 停止所有服务（强制 kill -9）
 echo "停止旧服务..."
-pkill -f "server/main.py" 2>/dev/null
-pkill -f "vite.*voice_chat_local_v2" 2>/dev/null
-sleep 2
+lsof -ti:$SERVER_PORT | xargs kill -9 2>/dev/null
+lsof -ti:$WEB_PORT | xargs kill -9 2>/dev/null
+sleep 1
 
 # 启动后端
 echo "[1/2] 启动后端 ($SERVER_PORT)..."
