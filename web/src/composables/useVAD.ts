@@ -2,10 +2,9 @@
  * VAD (Voice Activity Detection) Composable
  * 用于检测用户语音打断 TTS 播放
  *
- * 与原项目逻辑一致：
- * - threshold: 打断阈值 (10-80)，音量超过此值才可能触发打断
- * - triggerCount: 触发次数 (2-10)，连续检测到多少次才真正打断
- * - ignoreTime: 忽略时间 (ms)，TTS 开始后忽略麦克风输入的时间
+ * 支持两种模式：
+ * 1. 直接打断模式：检测到声音就打断（默认）
+ * 2. 唤醒词模式：检测到声音后录音识别，包含唤醒词才打断
  */
 
 import { ref, onUnmounted } from 'vue'
@@ -14,8 +13,12 @@ export interface VADOptions {
   threshold?: number | (() => number)      // 打断阈值 (0-255)
   triggerCount?: number | (() => number)   // 触发次数
   ignoreTime?: number | (() => number)     // 忽略时间 (ms)
+  wakeWord?: string                        // 唤醒词（如 "小智"），设置后启用唤醒词模式
+  wakeWordTimeout?: number                 // 唤醒词录音时长 (ms)，默认 1500
+  transcribeFn?: (blob: Blob) => Promise<string>  // ASR 识别函数
   onSpeechStart?: () => void
   onSpeechEnd?: () => void
+  onWakeWordDetected?: () => void          // 唤醒词检测到时回调
 }
 
 // 获取选项值（支持函数或直接值）
@@ -26,16 +29,18 @@ function getOptionValue<T>(option: T | (() => T) | undefined, defaultValue: T): 
 }
 
 export function useVAD(options: VADOptions = {}) {
-  const { onSpeechStart, onSpeechEnd } = options
+  const { onSpeechStart, onSpeechEnd, onWakeWordDetected, wakeWord, transcribeFn } = options
 
   // 动态获取配置值
   const getThreshold = () => getOptionValue(options.threshold, 60)
   const getTriggerCount = () => getOptionValue(options.triggerCount, 5)
   const getIgnoreTime = () => getOptionValue(options.ignoreTime, 800)
+  const wakeWordTimeout = options.wakeWordTimeout || 1500
 
   const isActive = ref(false)
   const isSpeaking = ref(false)
   const audioLevel = ref(0)
+  const isCheckingWakeWord = ref(false)  // 是否正在检测唤醒词
 
   let audioContext: AudioContext | null = null
   let analyser: AnalyserNode | null = null
@@ -45,6 +50,10 @@ export function useVAD(options: VADOptions = {}) {
   // 打断检测状态
   let startTime: number | null = null  // VAD 启动时间
   let consecutiveCount = 0              // 连续检测到超过阈值的次数
+
+  // 唤醒词录音相关
+  let wakeWordRecorder: MediaRecorder | null = null
+  let wakeWordChunks: Blob[] = []
 
   /**
    * 启动 VAD
@@ -65,6 +74,9 @@ export function useVAD(options: VADOptions = {}) {
       consecutiveCount = 0
 
       console.log('[VAD] Started, ignoring input for', getIgnoreTime(), 'ms')
+      if (wakeWord) {
+        console.log('[VAD] Wake word mode enabled:', wakeWord)
+      }
       monitor()
     } catch (error) {
       console.error('Failed to start VAD:', error)
@@ -81,6 +93,11 @@ export function useVAD(options: VADOptions = {}) {
       animationFrame = null
     }
 
+    if (wakeWordRecorder && wakeWordRecorder.state !== 'inactive') {
+      wakeWordRecorder.stop()
+      wakeWordRecorder = null
+    }
+
     if (mediaStream) {
       mediaStream.getTracks().forEach((track) => track.stop())
       mediaStream = null
@@ -94,9 +111,72 @@ export function useVAD(options: VADOptions = {}) {
     analyser = null
     isActive.value = false
     isSpeaking.value = false
+    isCheckingWakeWord.value = false
     audioLevel.value = 0
     startTime = null
     consecutiveCount = 0
+  }
+
+  /**
+   * 开始唤醒词录音检测
+   */
+  async function startWakeWordDetection(): Promise<void> {
+    if (!mediaStream || !transcribeFn || isCheckingWakeWord.value) return
+
+    isCheckingWakeWord.value = true
+    wakeWordChunks = []
+
+    console.log('[VAD] Starting wake word detection...')
+
+    // 创建新的 MediaRecorder
+    wakeWordRecorder = new MediaRecorder(mediaStream, {
+      mimeType: 'audio/webm;codecs=opus',
+    })
+
+    wakeWordRecorder.ondataavailable = (event) => {
+      if (event.data.size > 0) {
+        wakeWordChunks.push(event.data)
+      }
+    }
+
+    wakeWordRecorder.onstop = async () => {
+      if (wakeWordChunks.length === 0) {
+        isCheckingWakeWord.value = false
+        return
+      }
+
+      const audioBlob = new Blob(wakeWordChunks, { type: 'audio/webm' })
+      console.log('[VAD] Wake word audio recorded:', audioBlob.size, 'bytes')
+
+      try {
+        const text = await transcribeFn(audioBlob)
+        console.log('[VAD] Wake word ASR result:', text)
+
+        // 检查是否包含唤醒词
+        if (text && wakeWord && text.includes(wakeWord)) {
+          console.log('[VAD] Wake word detected!')
+          onWakeWordDetected?.()
+          onSpeechStart?.()
+        } else {
+          console.log('[VAD] Wake word not found, ignoring')
+        }
+      } catch (error) {
+        console.error('[VAD] Wake word ASR error:', error)
+      } finally {
+        isCheckingWakeWord.value = false
+        wakeWordRecorder = null
+      }
+    }
+
+    // 开始录音
+    wakeWordRecorder.start(100)
+
+    // 设置超时停止录音
+    setTimeout(() => {
+      if (wakeWordRecorder && wakeWordRecorder.state === 'recording') {
+        wakeWordRecorder.stop()
+      }
+    }, wakeWordTimeout)
   }
 
   /**
@@ -123,15 +203,30 @@ export function useVAD(options: VADOptions = {}) {
       return
     }
 
+    // 如果正在检测唤醒词，跳过
+    if (isCheckingWakeWord.value) {
+      animationFrame = requestAnimationFrame(monitor)
+      return
+    }
+
     // 语音活动检测
     if (average > threshold) {
       consecutiveCount++
 
-      // 连续检测到足够次数才触发打断
+      // 连续检测到足够次数才触发
       if (consecutiveCount >= triggerCount && !isSpeaking.value) {
         console.log(`[VAD] Speech detected! level=${average}, threshold=${threshold}, count=${consecutiveCount}`)
-        isSpeaking.value = true
-        onSpeechStart?.()
+
+        // 唤醒词模式：录音识别
+        if (wakeWord && transcribeFn) {
+          startWakeWordDetection()
+        } else {
+          // 直接打断模式
+          isSpeaking.value = true
+          onSpeechStart?.()
+        }
+
+        consecutiveCount = 0  // 重置计数
       }
     } else {
       // 音量低于阈值，重置计数
@@ -153,6 +248,7 @@ export function useVAD(options: VADOptions = {}) {
   return {
     isActive,
     isSpeaking,
+    isCheckingWakeWord,
     audioLevel,
     start,
     stop,

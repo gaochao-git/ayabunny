@@ -41,11 +41,27 @@ const ttsPlayer = useTTSPlayer({
   },
 })
 
-// VAD 语音打断检测（仅通话中使用）
+// 唤醒词 ASR 识别函数
+async function transcribeForWakeWord(blob: Blob): Promise<string> {
+  try {
+    const result = await transcribe(blob)
+    return result.success ? result.text : ''
+  } catch {
+    return ''
+  }
+}
+
+// VAD 语音打断检测（仅通话中使用，支持唤醒词模式）
 const vad = useVAD({
   threshold: () => settings.vadThreshold,
   triggerCount: () => settings.vadTriggerCount,
   ignoreTime: () => settings.vadIgnoreTime,
+  wakeWord: '小智',              // 唤醒词
+  wakeWordTimeout: 1500,         // 录音 1.5 秒
+  transcribeFn: transcribeForWakeWord,
+  onWakeWordDetected: () => {
+    console.log('[VAD] 唤醒词"小智"检测到！')
+  },
   onSpeechStart: () => {
     console.log('[VAD] 检测到用户说话，打断 TTS')
     if (ttsPlayer.isPlaying.value) {
