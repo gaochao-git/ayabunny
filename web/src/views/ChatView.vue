@@ -384,7 +384,7 @@ function clearChat() {
 
     <!-- 主卡片容器 -->
     <div
-      class="bg-white md:rounded-3xl shadow-2xl flex relative z-10 overflow-visible transition-all duration-300 w-full md:w-auto h-screen md:h-[85vh] md:max-h-[800px]"
+      class="bg-white md:rounded-3xl shadow-2xl flex relative z-10 overflow-hidden transition-all duration-300 w-full md:w-auto h-screen md:h-[85vh] md:max-h-[800px]"
     >
       <!-- 左侧：聊天区域 -->
       <div
@@ -392,7 +392,7 @@ function clearChat() {
         :class="{ 'hidden md:flex': showSettings }"
       >
         <!-- 头部 -->
-        <header class="bg-gradient-to-r from-pink-400 via-pink-500 to-orange-400 px-5 py-4 flex items-center justify-between">
+        <header class="bg-gradient-to-r from-pink-400 via-pink-500 to-orange-400 px-5 h-16 flex items-center justify-between">
           <div class="flex items-center gap-2">
             <span class="text-white text-lg font-semibold">小智</span>
           </div>

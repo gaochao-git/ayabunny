@@ -159,7 +159,7 @@ onMounted(() => {
     class="w-full md:w-[480px] h-full flex-shrink-0 flex flex-col overflow-hidden"
   >
     <!-- 头部标题 -->
-    <div class="bg-gradient-to-r from-pink-400 via-pink-500 to-orange-400 px-4 py-3 flex items-center justify-between">
+    <div class="bg-gradient-to-r from-pink-400 via-pink-500 to-orange-400 px-5 h-16 flex items-center justify-between">
       <div class="flex items-center gap-2">
         <!-- 手机端返回按钮 -->
         <button
@@ -170,7 +170,7 @@ onMounted(() => {
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
           </svg>
         </button>
-        <h2 class="text-white font-semibold">家长控制台</h2>
+        <h2 class="text-white text-lg font-semibold">家长控制台</h2>
       </div>
       <!-- PC端关闭按钮 -->
       <button
