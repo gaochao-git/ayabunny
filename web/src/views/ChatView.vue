@@ -52,11 +52,14 @@ async function transcribeForWakeWord(blob: Blob): Promise<string> {
 }
 
 // VAD 语音打断检测（仅通话中使用，支持唤醒词模式）
+// 唤醒词支持同音字：小智、小志、小知、乔治等
+const wakeWords = ['小智', '小志', '小知', '小之', '乔治']
+
 const vad = useVAD({
   threshold: () => settings.vadThreshold,
   triggerCount: () => settings.vadTriggerCount,
   ignoreTime: () => settings.vadIgnoreTime,
-  wakeWord: '小智',              // 唤醒词
+  wakeWords: wakeWords,          // 唤醒词列表（支持同音字）
   wakeWordTimeout: 1500,         // 录音 1.5 秒
   transcribeFn: transcribeForWakeWord,
   onWakeWordDetected: () => {
@@ -160,6 +163,8 @@ function toggleCall() {
 
 // 开始语音通话
 async function startCall() {
+  // 移动端需要在用户交互时解锁音频
+  await ttsPlayer.unlock()
   isInCall.value = true
   await startCallRecording()
 }

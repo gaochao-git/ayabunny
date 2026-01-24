@@ -49,10 +49,25 @@ export function useTTSPlayer(options: TTSPlayerOptions = {}) {
       gainNode = audioContext.createGain()
       gainNode.connect(audioContext.destination)
     }
+    // 移动端需要在用户交互后恢复 AudioContext
+    if (audioContext.state === 'suspended') {
+      audioContext.resume()
+    }
     // 更新增益值
     if (gainNode) {
       gainNode.gain.value = getGain()
     }
+  }
+
+  /**
+   * 解锁音频（移动端需要在用户点击时调用）
+   */
+  async function unlock(): Promise<void> {
+    initAudioContext()
+    if (audioContext && audioContext.state === 'suspended') {
+      await audioContext.resume()
+    }
+    console.log('[TTS] Audio unlocked, state:', audioContext?.state)
   }
 
   /**
@@ -199,5 +214,6 @@ export function useTTSPlayer(options: TTSPlayerOptions = {}) {
     speak,
     stop,
     setGain,
+    unlock,  // 移动端需要在用户交互时调用
   }
 }
