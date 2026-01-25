@@ -376,11 +376,20 @@ async function handleCallRecordingStop() {
 
       await chat.send(result.text, onSentence)
 
-      // 如果不播放 TTS，直接继续录音
-      if (!settings.ttsEnabled && isInCall.value) {
-        startCallRecording()
+      // chat.send 完成后，检查是否需要启动录音
+      // 条件：TTS 没有启用，或 TTS 没有在播放/待播放
+      if (isInCall.value) {
+        if (!settings.ttsEnabled) {
+          // TTS 未启用，直接继续录音
+          console.log('[Call] TTS 未启用，继续录音')
+          startCallRecording()
+        } else if (!ttsPlayer.isPlaying.value && !ttsPlayer.isPending.value) {
+          // TTS 启用但没有内容在播放，可能是内容被过滤了，直接继续录音
+          console.log('[Call] TTS 无待播放内容，继续录音')
+          startCallRecording()
+        }
+        // 如果 TTS 正在播放/待播放，会在 onPlayEnd 回调中继续录音
       }
-      // 如果播放 TTS，会在 onPlayEnd 回调中继续录音
     } else if (isInCall.value) {
       // 识别失败或无内容，继续录音
       console.log('[Call] ASR 无结果，继续录音')
