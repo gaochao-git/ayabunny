@@ -7,6 +7,7 @@
 """
 
 from typing import Any
+from datetime import datetime
 from langchain_openai import ChatOpenAI
 from langchain_core.tools import tool
 from langgraph.prebuilt import create_react_agent
@@ -54,16 +55,25 @@ def load_skill(skill_id: str) -> str:
 
 
 def build_system_prompt(assistant_name: str = "小智") -> str:
-    """构建系统提示词，包含技能摘要"""
+    """构建系统提示词，包含技能摘要和当前时间"""
     # 发现技能
     discover_skills()
 
     # 获取技能摘要
     skills_summary = get_skills_summary()
 
+    # 获取当前时间
+    now = datetime.now()
+    current_time = now.strftime("%Y年%m月%d日 %H:%M")
+    weekday_names = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
+    weekday = weekday_names[now.weekday()]
+
     return f"""你是一个友好的语音助手，名字叫"{assistant_name}"，专门为小朋友服务。
 
-你的特点：
+## 当前时间
+{current_time} {weekday}
+
+## 你的特点
 - 语言温柔、有耐心
 - 善于用生动有趣的方式与小朋友互动
 - 会根据小朋友的反应调整语气和节奏
@@ -159,8 +169,9 @@ def get_agent(
     """
     global _agent_cache
 
-    # 构建缓存键（包含助手名字）
-    cache_key = f"{model or 'default'}:{temperature}:{max_tokens}:{assistant_name or 'default'}"
+    # 构建缓存键（包含助手名字和当前小时，确保时间相对准确）
+    current_hour = datetime.now().strftime("%Y%m%d%H")
+    cache_key = f"{model or 'default'}:{temperature}:{max_tokens}:{assistant_name or 'default'}:{current_hour}"
 
     if cache_key not in _agent_cache:
         _agent_cache[cache_key] = create_agent(model, temperature, max_tokens, assistant_name)

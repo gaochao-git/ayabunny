@@ -19,3 +19,9 @@ aiofiles>=24.1.0
 python-dotenv>=1.0.0
 pydantic>=2.9.0
 pydantic-settings>=2.5.0
+
+# VAD
+websockets>=12.0
+torch>=2.0.0
+torchaudio>=2.0.0
+# silero-vad  # 通过 torch.hub 加载，无需单独安装

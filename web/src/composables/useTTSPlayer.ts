@@ -94,9 +94,29 @@ export function useTTSPlayer(options: TTSPlayerOptions = {}) {
   }
 
   /**
+   * 检查文本是否有效（过滤纯 emoji、空白等无法朗读的内容）
+   */
+  function isValidText(text: string): boolean {
+    // 移除 emoji 和特殊符号
+    const cleanText = text
+      .replace(/[\u{1F300}-\u{1F9FF}]/gu, '')  // emoji
+      .replace(/[\u{2600}-\u{26FF}]/gu, '')    // 杂项符号
+      .replace(/[\u{2700}-\u{27BF}]/gu, '')    // 装饰符号
+      .replace(/[^\u4e00-\u9fa5a-zA-Z0-9]/g, '') // 只保留中英文和数字
+      .trim()
+    return cleanText.length > 0
+  }
+
+  /**
    * 播放文本（立即开始预合成）
    */
   async function speak(text: string): Promise<void> {
+    // 过滤无效文本（纯 emoji、空白等）
+    if (!isValidText(text)) {
+      console.log(`[TTS] 跳过无效文本: "${text}"`)
+      return
+    }
+
     // 如果被停止了，重置状态
     if (isStopped) {
       isStopped = false

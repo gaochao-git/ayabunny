@@ -126,16 +126,22 @@ const simpleVAD = useVAD({
 // WebRTC VAD（基于频谱分析）
 const webrtcVAD = useWebRTCVAD({
   ignoreTime: () => settings.vadIgnoreTime,
+  wakeWords: getWakeWords,
+  transcribeFn: transcribeForWakeWord,
+  onWakeWordDetected: (word) => {
+    console.log(`[WebRTC VAD] 中断词匹配: "${word}"`)
+  },
   onSpeechStart: handleVADSpeechStart,
 })
 
-// Silero VAD（基于前端 AI 模型）
+// Silero VAD（基于后端 AI 模型 + 中断词验证）
 const sileroVAD = useSileroVAD({
-  wakeWords: getWakeWords,
-  transcribeFn: transcribeForWakeWord,
+  wsUrl: 'ws://127.0.0.1:10097',  // Silero VAD 服务 WebSocket 地址
+  wakeWords: getWakeWords,  // 中断词列表（动态获取，包含助手名字）
+  transcribeFn: transcribeForWakeWord,  // ASR 识别函数
   ignoreTime: () => settings.vadIgnoreTime,
-  onWakeWordDetected: () => {
-    console.log('[SileroVAD] 唤醒词检测到！')
+  onWakeWordDetected: (word, text) => {
+    console.log(`[Silero VAD] 中断词匹配: "${word}" (原文: "${text}")`)
   },
   onSpeechStart: handleVADSpeechStart,
 })
@@ -455,7 +461,7 @@ function clearChat() {
       <div class="flex-1 min-h-0 flex flex-col">
         <!-- 通话中：显示角色头像 -->
         <template v-if="isInCall">
-          <div class="flex-1 flex flex-col items-center justify-center bg-gradient-to-b from-white/50 to-white">
+          <div class="flex-1 flex flex-col items-center justify-center pb-16 bg-gradient-to-b from-white/50 to-white">
             <!-- 角色头像区域 -->
             <div class="relative">
               <!-- 说话时的声波动效 -->
@@ -546,7 +552,7 @@ function clearChat() {
       </div>
 
       <!-- 底部输入区 -->
-      <footer class="flex-shrink-0 px-4 py-3 bg-white safe-bottom">
+      <footer class="flex-shrink-0 px-4 py-3 md:pb-4 bg-white safe-bottom">
         <!-- 提示文字 -->
         <div v-if="isInCall" class="text-center text-xs text-gray-400 mb-3">
           说完自动识别 | 点击头像挂断

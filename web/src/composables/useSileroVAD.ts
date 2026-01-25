@@ -1,121 +1,188 @@
 /**
  * Silero VAD Composable
- * 使用 Silero VAD 模型进行语音活动检测
- * 比简单音量检测更准确，能区分人声和噪音
+ * 使用后端 Silero VAD 服务进行语音活动检测
+ * 通过 WebSocket 流式传输音频，接收 VAD 事件
+ *
+ * 后端服务: server/silero_vad_server.py (端口 10097)
  */
 
 import { ref, onUnmounted } from 'vue'
-import { MicVAD } from '@ricky0123/vad-web'
 
 export interface SileroVADOptions {
-  /** 语音开始回调 */
+  /** Silero VAD WebSocket 地址 */
+  wsUrl?: string
+  /** 语音开始回调（如果配置了中断词，只有匹配时才触发） */
   onSpeechStart?: () => void
-  /** 语音结束回调，返回音频数据 */
-  onSpeechEnd?: (audio: Float32Array) => void
-  /** 唤醒词列表（支持数组或返回数组的函数） */
-  wakeWords?: string[] | (() => string[])
-  /** ASR 识别函数（用于唤醒词检测） */
-  transcribeFn?: (blob: Blob) => Promise<string>
-  /** 唤醒词检测到时回调 */
-  onWakeWordDetected?: () => void
-  /** 启动后忽略检测的时间 (ms)，防止检测到 TTS 声音 */
+  /** 语音结束回调 */
+  onSpeechEnd?: () => void
+  /** 中断词检测到时的回调 */
+  onWakeWordDetected?: (word: string, text: string) => void
+  /** 启动后忽略检测的时间 (ms) */
   ignoreTime?: number | (() => number)
+  /** 中断词列表（支持数组或返回数组的函数） */
+  wakeWords?: string[] | (() => string[])
+  /** ASR 识别函数（用于中断词验证） */
+  transcribeFn?: (blob: Blob) => Promise<string>
 }
 
 export function useSileroVAD(options: SileroVADOptions = {}) {
-  const { onSpeechStart, onSpeechEnd, wakeWords, transcribeFn, onWakeWordDetected, ignoreTime } = options
+  const {
+    wsUrl = 'ws://127.0.0.1:10097',
+    onSpeechStart,
+    onSpeechEnd,
+    onWakeWordDetected,
+    ignoreTime = 800,
+    wakeWords = [],
+    transcribeFn,
+  } = options
 
   const isActive = ref(false)
   const isSpeaking = ref(false)
   const isLoading = ref(false)
+  const isConnecting = ref(false)
   const isCheckingWakeWord = ref(false)
 
-  let vadInstance: MicVAD | null = null
-  let ignoreUntil = 0  // 忽略检测直到此时间戳
+  let ws: WebSocket | null = null
+  let mediaStream: MediaStream | null = null
+  let audioContext: AudioContext | null = null
+  let processor: ScriptProcessorNode | null = null
+  let ignoreUntil = 0
 
-  // 获取 ignoreTime 值（支持函数或固定值）
+  // 音频缓冲区（用于中断词识别，环形缓冲区保留最近 3 秒）
+  let audioChunks: Int16Array[] = []
+  let speechStartTime = 0
+
+  // 获取忽略时间
   function getIgnoreTime(): number {
-    if (typeof ignoreTime === 'function') return ignoreTime()
-    return ignoreTime ?? 800
+    return typeof ignoreTime === 'function' ? ignoreTime() : ignoreTime
   }
 
-  // 获取唤醒词列表（支持函数或固定值）
+  // 获取中断词列表
   function getWakeWords(): string[] {
-    if (typeof wakeWords === 'function') return wakeWords()
-    return wakeWords ?? []
+    return typeof wakeWords === 'function' ? wakeWords() : wakeWords
   }
 
   /**
-   * 将 Float32Array 转换为 WAV Blob
+   * 将 Float32Array 转换为 Int16Array (PCM)
    */
-  function float32ToWavBlob(audioData: Float32Array, sampleRate: number = 16000): Blob {
-    const numChannels = 1
-    const bitsPerSample = 16
-    const bytesPerSample = bitsPerSample / 8
-    const blockAlign = numChannels * bytesPerSample
-    const byteRate = sampleRate * blockAlign
-    const dataSize = audioData.length * bytesPerSample
-    const buffer = new ArrayBuffer(44 + dataSize)
-    const view = new DataView(buffer)
+  function float32ToInt16(float32: Float32Array): Int16Array {
+    const int16 = new Int16Array(float32.length)
+    for (let i = 0; i < float32.length; i++) {
+      const s = Math.max(-1, Math.min(1, float32[i]))
+      int16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF
+    }
+    return int16
+  }
 
-    // WAV header
-    const writeString = (offset: number, str: string) => {
-      for (let i = 0; i < str.length; i++) {
-        view.setUint8(offset + i, str.charCodeAt(i))
-      }
+  /**
+   * 重采样到 16kHz
+   */
+  function resample(audioData: Float32Array, fromSampleRate: number, toSampleRate: number): Float32Array {
+    if (fromSampleRate === toSampleRate) {
+      return audioData
+    }
+    const ratio = fromSampleRate / toSampleRate
+    const newLength = Math.round(audioData.length / ratio)
+    const result = new Float32Array(newLength)
+    for (let i = 0; i < newLength; i++) {
+      const index = Math.floor(i * ratio)
+      result[i] = audioData[index]
+    }
+    return result
+  }
+
+  /**
+   * 将 PCM 数据转换为 WAV Blob
+   */
+  function pcmToWavBlob(chunks: Int16Array[], sampleRate: number = 16000): Blob {
+    // 合并所有 chunks
+    const totalLength = chunks.reduce((sum, chunk) => sum + chunk.length, 0)
+    const pcmData = new Int16Array(totalLength)
+    let offset = 0
+    for (const chunk of chunks) {
+      pcmData.set(chunk, offset)
+      offset += chunk.length
     }
 
-    writeString(0, 'RIFF')
+    // 创建 WAV 头
+    const wavHeader = new ArrayBuffer(44)
+    const view = new DataView(wavHeader)
+    const numChannels = 1
+    const bitsPerSample = 16
+    const byteRate = sampleRate * numChannels * bitsPerSample / 8
+    const blockAlign = numChannels * bitsPerSample / 8
+    const dataSize = pcmData.length * 2
+
+    // RIFF header
+    view.setUint32(0, 0x52494646, false) // "RIFF"
     view.setUint32(4, 36 + dataSize, true)
-    writeString(8, 'WAVE')
-    writeString(12, 'fmt ')
+    view.setUint32(8, 0x57415645, false) // "WAVE"
+    // fmt chunk
+    view.setUint32(12, 0x666d7420, false) // "fmt "
     view.setUint32(16, 16, true)
-    view.setUint16(20, 1, true)
+    view.setUint16(20, 1, true) // PCM
     view.setUint16(22, numChannels, true)
     view.setUint32(24, sampleRate, true)
     view.setUint32(28, byteRate, true)
     view.setUint16(32, blockAlign, true)
     view.setUint16(34, bitsPerSample, true)
-    writeString(36, 'data')
+    // data chunk
+    view.setUint32(36, 0x64617461, false) // "data"
     view.setUint32(40, dataSize, true)
 
-    // Audio data
-    let offset = 44
-    for (let i = 0; i < audioData.length; i++) {
-      const sample = Math.max(-1, Math.min(1, audioData[i]))
-      view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7FFF, true)
-      offset += 2
-    }
-
-    return new Blob([buffer], { type: 'audio/wav' })
+    return new Blob([wavHeader, pcmData.buffer], { type: 'audio/wav' })
   }
 
   /**
-   * 检测唤醒词
+   * 检查文本是否包含中断词
    */
-  async function checkWakeWord(audioData: Float32Array): Promise<boolean> {
+  function checkWakeWords(text: string): string | null {
     const words = getWakeWords()
-    if (!words.length || !transcribeFn) return true // 没有唤醒词要求，直接通过
+    if (!text || words.length === 0) return null
+    const lowerText = text.toLowerCase()
+    for (const word of words) {
+      if (lowerText.includes(word.toLowerCase())) {
+        return word
+      }
+    }
+    return null
+  }
+
+  /**
+   * 验证中断词
+   */
+  async function verifyWakeWord(): Promise<boolean> {
+    if (!transcribeFn || audioChunks.length === 0) {
+      console.log('[Silero VAD] 无法验证中断词：缺少 transcribeFn 或音频数据')
+      return false
+    }
 
     isCheckingWakeWord.value = true
     try {
-      const wavBlob = float32ToWavBlob(audioData)
-      console.log('[SileroVAD] 检测唤醒词，音频大小:', wavBlob.size)
+      // 转换为 WAV
+      const wavBlob = pcmToWavBlob(audioChunks)
+      console.log(`[Silero VAD] 发送 ASR 验证，音频大小: ${wavBlob.size} bytes`)
 
+      // ASR 识别
       const text = await transcribeFn(wavBlob)
-      console.log('[SileroVAD] ASR 结果:', text)
+      console.log(`[Silero VAD] ASR 识别结果: "${text}"`)
 
-      const detected = words.some(word => text?.includes(word))
-      if (detected) {
-        console.log('[SileroVAD] 检测到唤醒词')
-        onWakeWordDetected?.()
+      // 检查中断词
+      const matchedWord = checkWakeWords(text)
+      if (matchedWord) {
+        console.log(`[Silero VAD] 匹配到中断词: "${matchedWord}"`)
+        onWakeWordDetected?.(matchedWord, text)
+        return true
+      } else {
+        console.log(`[Silero VAD] 未匹配到中断词`)
+        return false
       }
-      return detected
     } catch (error) {
-      console.error('[SileroVAD] 唤醒词检测失败:', error)
+      console.error('[Silero VAD] ASR 验证失败:', error)
       return false
     } finally {
       isCheckingWakeWord.value = false
+      audioChunks = []  // 清空缓冲区
     }
   }
 
@@ -123,65 +190,155 @@ export function useSileroVAD(options: SileroVADOptions = {}) {
    * 启动 VAD
    */
   async function start(): Promise<void> {
-    if (isActive.value) return
+    if (isActive.value || isConnecting.value) return
 
+    isConnecting.value = true
     isLoading.value = true
-    console.log('[SileroVAD] 正在加载模型...')
-
-    // 设置忽略时间
-    ignoreUntil = Date.now() + getIgnoreTime()
+    console.log('[Silero VAD] 启动中...')
 
     try {
-      vadInstance = await MicVAD.new({
-        onSpeechStart: () => {
-          // 检查是否在忽略期内
-          if (Date.now() < ignoreUntil) {
-            console.log('[SileroVAD] 忽略期内，跳过语音检测')
-            return
-          }
+      // 获取麦克风（关闭降噪以提高语音检测灵敏度）
+      mediaStream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,   // 保留回声消除，过滤 TTS 声音
+          noiseSuppression: false,  // 关闭降噪，提高检测灵敏度
+          autoGainControl: true,
+          sampleRate: 16000,
+        }
+      })
 
-          console.log('[SileroVAD] 检测到语音开始')
-          isSpeaking.value = true
-          // 如果没有唤醒词要求，直接触发回调
-          if (!getWakeWords().length) {
-            onSpeechStart?.()
-          }
-        },
-        onSpeechEnd: async (audio: Float32Array) => {
-          // 检查是否在忽略期内
-          if (Date.now() < ignoreUntil) {
-            console.log('[SileroVAD] 忽略期内，跳过语音结束处理')
-            return
-          }
+      // 创建音频处理
+      audioContext = new AudioContext({ sampleRate: 16000 })
+      const source = audioContext.createMediaStreamSource(mediaStream)
 
-          console.log('[SileroVAD] 检测到语音结束，样本数:', audio.length)
-          isSpeaking.value = false
+      // 使用 ScriptProcessor
+      processor = audioContext.createScriptProcessor(4096, 1, 1)
 
-          // 如果有唤醒词要求，先检测
-          if (getWakeWords().length && transcribeFn) {
-            const hasWakeWord = await checkWakeWord(audio)
-            if (hasWakeWord) {
-              onSpeechStart?.() // 唤醒词匹配，触发开始
+      // 连接 WebSocket
+      ws = new WebSocket(wsUrl)
+
+      ws.onopen = () => {
+        console.log('[Silero VAD] WebSocket 已连接')
+
+        // 发送配置
+        const config = {
+          mode: 'streaming',
+          sample_rate: 16000,
+          threshold: 0.5,
+          min_speech_ms: 250,
+          min_silence_ms: 500,
+        }
+        ws?.send(JSON.stringify(config))
+
+        // 设置忽略时间
+        const ignoreMs = getIgnoreTime()
+        ignoreUntil = Date.now() + ignoreMs
+        isActive.value = true
+        isConnecting.value = false
+        isLoading.value = false
+        console.log(`[Silero VAD] 启动完成, 忽略时间: ${ignoreMs}ms, 中断词:`, getWakeWords())
+
+        // 开始处理音频
+        processor!.onaudioprocess = (e) => {
+          if (!ws || ws.readyState !== WebSocket.OPEN) return
+
+          const inputData = e.inputBuffer.getChannelData(0)
+          // 重采样到 16kHz
+          const resampled = resample(inputData, audioContext!.sampleRate, 16000)
+          const pcmData = float32ToInt16(resampled)
+
+          // 发送到 VAD 服务
+          ws.send(pcmData.buffer)
+
+          // 始终缓存音频用于中断词识别（环形缓冲区，保留最近 3 秒）
+          if (getWakeWords().length > 0 && transcribeFn) {
+            audioChunks.push(pcmData)
+            // 限制缓冲区大小（最多 3 秒）
+            const maxChunks = Math.ceil(16000 * 3 / 4096)
+            while (audioChunks.length > maxChunks) {
+              audioChunks.shift()
+            }
+          }
+        }
+
+        source.connect(processor)
+        processor!.connect(audioContext!.destination)
+      }
+
+      ws.onmessage = async (event) => {
+        // 忽略期内不处理
+        if (Date.now() < ignoreUntil) {
+          console.log('[Silero VAD] 忽略期内，跳过消息')
+          return
+        }
+
+        try {
+          const data = JSON.parse(event.data)
+          console.log('[Silero VAD] 收到消息:', JSON.stringify(data).slice(0, 100))
+
+          // 检测到语音开始
+          if (data.event === 'speech_start' || (data.text === 'speech_start' && data.is_speaking)) {
+            if (!isSpeaking.value) {
+              console.log('[Silero VAD] 检测到语音开始')
+              isSpeaking.value = true
+              speechStartTime = Date.now()
+
+              // 如果没有配置中断词，直接触发回调
+              if (getWakeWords().length === 0 || !transcribeFn) {
+                onSpeechStart?.()
+              }
             }
           }
 
-          onSpeechEnd?.(audio)
-        },
-        positiveSpeechThreshold: 0.8,  // 语音检测阈值
-        negativeSpeechThreshold: 0.3,  // 非语音检测阈值
-        minSpeechFrames: 3,            // 最小语音帧数
-        preSpeechPadFrames: 10,        // 语音前填充帧数
-        redemptionFrames: 8,           // 语音结束前的缓冲帧数
-      })
+          // 检测到语音结束
+          if (data.event === 'speech_end' || data.is_final) {
+            if (isSpeaking.value) {
+              console.log('[Silero VAD] 检测到语音结束, audioChunks:', audioChunks.length)
+              isSpeaking.value = false
 
-      vadInstance.start()
-      isActive.value = true
-      console.log('[SileroVAD] 已启动')
+              // 如果配置了中断词，进行验证
+              if (getWakeWords().length > 0 && transcribeFn) {
+                const speechDuration = Date.now() - speechStartTime
+                console.log(`[Silero VAD] 语音时长: ${speechDuration}ms`)
+
+                // 只有语音足够长才验证
+                if (speechDuration >= 300 && audioChunks.length > 0) {
+                  const isWakeWord = await verifyWakeWord()
+                  if (isWakeWord) {
+                    onSpeechStart?.()  // 匹配到中断词才触发
+                  }
+                } else {
+                  console.log('[Silero VAD] 语音太短，跳过验证')
+                  audioChunks = []
+                }
+              }
+
+              onSpeechEnd?.()
+            }
+          }
+        } catch (e) {
+          // 忽略解析错误
+        }
+      }
+
+      ws.onerror = (error) => {
+        console.error('[Silero VAD] WebSocket 错误:', error)
+        isConnecting.value = false
+        isLoading.value = false
+      }
+
+      ws.onclose = () => {
+        console.log('[Silero VAD] WebSocket 已关闭')
+        isActive.value = false
+        isConnecting.value = false
+        isLoading.value = false
+      }
+
     } catch (error) {
-      console.error('[SileroVAD] 启动失败:', error)
-      throw error
-    } finally {
+      console.error('[Silero VAD] 启动失败:', error)
+      isConnecting.value = false
       isLoading.value = false
+      throw error
     }
   }
 
@@ -189,35 +346,59 @@ export function useSileroVAD(options: SileroVADOptions = {}) {
    * 停止 VAD
    */
   function stop(): void {
-    if (vadInstance) {
-      vadInstance.pause()
-      vadInstance.destroy()
-      vadInstance = null
+    if (processor) {
+      processor.disconnect()
+      processor = null
     }
+
+    if (mediaStream) {
+      mediaStream.getTracks().forEach(track => track.stop())
+      mediaStream = null
+    }
+
+    if (audioContext) {
+      audioContext.close()
+      audioContext = null
+    }
+
+    if (ws) {
+      // 发送结束信号
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ is_speaking: false }))
+      }
+      ws.close()
+      ws = null
+    }
+
     isActive.value = false
     isSpeaking.value = false
+    isConnecting.value = false
+    isLoading.value = false
     isCheckingWakeWord.value = false
-    console.log('[SileroVAD] 已停止')
+    audioChunks = []
+
+    console.log('[Silero VAD] 已停止')
   }
 
   /**
-   * 暂停 VAD
+   * 暂停 VAD（断开 WebSocket 但保留麦克风）
    */
   function pause(): void {
-    if (vadInstance) {
-      vadInstance.pause()
-      console.log('[SileroVAD] 已暂停')
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ is_speaking: false }))
     }
+    console.log('[Silero VAD] 已暂停')
   }
 
   /**
    * 恢复 VAD
    */
   function resume(): void {
-    if (vadInstance) {
-      vadInstance.start()
-      console.log('[SileroVAD] 已恢复')
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ reset: true }))
+      ignoreUntil = Date.now() + getIgnoreTime()
     }
+    console.log('[Silero VAD] 已恢复')
   }
 
   onUnmounted(stop)
@@ -226,6 +407,7 @@ export function useSileroVAD(options: SileroVADOptions = {}) {
     isActive,
     isSpeaking,
     isLoading,
+    isConnecting,
     isCheckingWakeWord,
     start,
     stop,

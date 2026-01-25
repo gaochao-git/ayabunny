@@ -22,4 +22,5 @@ export default defineConfig({
       },
     },
   },
+  // 注意：Silero VAD 现在通过后端 WebSocket 服务运行，不再需要 ONNX Runtime
 })

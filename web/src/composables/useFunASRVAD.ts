@@ -194,11 +194,11 @@ export function useFunASRVAD(options: FunASRVADOptions = {}) {
     console.log('[FunASR VAD] 启动中...')
 
     try {
-      // 获取麦克风
+      // 获取麦克风（关闭降噪以提高语音检测灵敏度）
       mediaStream = await navigator.mediaDevices.getUserMedia({
         audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
+          echoCancellation: true,   // 保留回声消除，过滤 TTS 声音
+          noiseSuppression: false,  // 关闭降噪，提高检测灵敏度
           autoGainControl: true,
           sampleRate: 16000,
         }
@@ -230,9 +230,11 @@ export function useFunASRVAD(options: FunASRVADOptions = {}) {
         ws?.send(JSON.stringify(config))
 
         // 设置忽略时间
-        ignoreUntil = Date.now() + getIgnoreTime()
+        const ignoreMs = getIgnoreTime()
+        ignoreUntil = Date.now() + ignoreMs
         isActive.value = true
         isConnecting.value = false
+        console.log(`[FunASR VAD] 启动完成, 忽略时间: ${ignoreMs}ms, 中断词:`, getWakeWords())
 
         // 开始处理音频
         processor!.onaudioprocess = (e) => {
@@ -246,12 +248,12 @@ export function useFunASRVAD(options: FunASRVADOptions = {}) {
           // 发送到 VAD 服务
           ws.send(pcmData.buffer)
 
-          // 如果正在说话，缓存音频用于中断词识别
-          if (isSpeaking.value && getWakeWords().length > 0 && transcribeFn) {
+          // 始终缓存音频用于中断词识别（环形缓冲区，保留最近 3 秒）
+          if (getWakeWords().length > 0 && transcribeFn) {
             audioChunks.push(pcmData)
             // 限制缓冲区大小（最多 3 秒）
             const maxChunks = Math.ceil(16000 * 3 / 4096)
-            if (audioChunks.length > maxChunks) {
+            while (audioChunks.length > maxChunks) {
               audioChunks.shift()
             }
           }
@@ -263,18 +265,22 @@ export function useFunASRVAD(options: FunASRVADOptions = {}) {
 
       ws.onmessage = async (event) => {
         // 忽略期内不处理
-        if (Date.now() < ignoreUntil) return
+        if (Date.now() < ignoreUntil) {
+          console.log('[FunASR VAD] 忽略期内，跳过消息')
+          return
+        }
 
         try {
           const data = JSON.parse(event.data)
+          console.log('[FunASR VAD] 收到消息:', JSON.stringify(data).slice(0, 100))
 
           // 检测到语音开始
           if (data.text && data.text.length > 0) {
             if (!isSpeaking.value) {
-              console.log('[FunASR VAD] 检测到语音开始')
+              console.log('[FunASR VAD] 检测到语音开始, text:', data.text)
               isSpeaking.value = true
               speechStartTime = Date.now()
-              audioChunks = []  // 清空缓冲区，开始新的录制
+              // 不清空缓冲区，保留之前缓存的音频（可能包含中断词的开头）
 
               // 如果没有配置中断词，直接触发回调
               if (getWakeWords().length === 0 || !transcribeFn) {
@@ -286,7 +292,7 @@ export function useFunASRVAD(options: FunASRVADOptions = {}) {
           // 检测到语音结束
           if (data.is_final || (data.text === '' && isSpeaking.value)) {
             if (isSpeaking.value) {
-              console.log('[FunASR VAD] 检测到语音结束')
+              console.log('[FunASR VAD] 检测到语音结束, is_final:', data.is_final, ', audioChunks:', audioChunks.length)
               isSpeaking.value = false
 
               // 如果配置了中断词，进行验证

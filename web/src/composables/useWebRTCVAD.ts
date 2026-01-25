@@ -7,7 +7,7 @@
 import { ref, onUnmounted } from 'vue'
 
 export interface WebRTCVADOptions {
-  /** 语音开始回调 */
+  /** 语音开始回调（如果配置了中断词，只有匹配时才触发） */
   onSpeechStart?: () => void
   /** 语音结束回调 */
   onSpeechEnd?: () => void
@@ -21,6 +21,12 @@ export interface WebRTCVADOptions {
   speechFrames?: number
   /** 连续检测到静音的帧数才结束 */
   silenceFrames?: number
+  /** 中断词列表（支持数组或返回数组的函数） */
+  wakeWords?: string[] | (() => string[])
+  /** ASR 识别函数（用于中断词验证） */
+  transcribeFn?: (blob: Blob) => Promise<string>
+  /** 中断词检测到时的回调 */
+  onWakeWordDetected?: (word: string) => void
 }
 
 export function useWebRTCVAD(options: WebRTCVADOptions = {}) {
@@ -31,11 +37,15 @@ export function useWebRTCVAD(options: WebRTCVADOptions = {}) {
     speechFreqRatio = 0.4,
     ignoreTime = 800,
     speechFrames = 3,
-    silenceFrames = 15,
+    silenceFrames = 30,  // 增加到 30 帧（约 500ms 静音才结束）
+    wakeWords,
+    transcribeFn,
+    onWakeWordDetected,
   } = options
 
   const isActive = ref(false)
   const isSpeaking = ref(false)
+  const isCheckingWakeWord = ref(false)
 
   let audioContext: AudioContext | null = null
   let analyser: AnalyserNode | null = null
@@ -45,6 +55,10 @@ export function useWebRTCVAD(options: WebRTCVADOptions = {}) {
   let speechFrameCount = 0
   let silenceFrameCount = 0
 
+  // 音频录制相关
+  let mediaRecorder: MediaRecorder | null = null
+  let audioChunks: Blob[] = []
+
   // 获取配置值
   function getThreshold(): number {
     return typeof threshold === 'function' ? threshold() : threshold
@@ -52,6 +66,86 @@ export function useWebRTCVAD(options: WebRTCVADOptions = {}) {
 
   function getIgnoreTime(): number {
     return typeof ignoreTime === 'function' ? ignoreTime() : ignoreTime
+  }
+
+  function getWakeWords(): string[] {
+    if (typeof wakeWords === 'function') return wakeWords()
+    return wakeWords ?? []
+  }
+
+  /**
+   * 开始录音（用于中断词检测）
+   */
+  function startRecording() {
+    if (!mediaStream || mediaRecorder?.state === 'recording') {
+      console.log('[WebRTC VAD] 录音已在进行中或无媒体流')
+      return
+    }
+
+    audioChunks = []
+    mediaRecorder = new MediaRecorder(mediaStream, { mimeType: 'audio/webm;codecs=opus' })
+
+    mediaRecorder.ondataavailable = (e) => {
+      if (e.data.size > 0) {
+        audioChunks.push(e.data)
+        console.log(`[WebRTC VAD] 录音数据: ${e.data.size} bytes, 总 chunks: ${audioChunks.length}`)
+      }
+    }
+
+    mediaRecorder.start(100)  // 每 100ms 收集一次数据
+    console.log('[WebRTC VAD] 开始录音')
+  }
+
+  /**
+   * 停止录音并返回音频 Blob
+   */
+  function stopRecording(): Promise<Blob> {
+    return new Promise((resolve) => {
+      if (!mediaRecorder || mediaRecorder.state !== 'recording') {
+        resolve(new Blob(audioChunks, { type: 'audio/webm' }))
+        return
+      }
+
+      mediaRecorder.onstop = () => {
+        resolve(new Blob(audioChunks, { type: 'audio/webm' }))
+      }
+
+      mediaRecorder.stop()
+    })
+  }
+
+  /**
+   * 验证中断词
+   */
+  async function verifyWakeWord(): Promise<boolean> {
+    if (!transcribeFn || audioChunks.length === 0) return false
+
+    isCheckingWakeWord.value = true
+    try {
+      const audioBlob = await stopRecording()
+      console.log(`[WebRTC VAD] 发送 ASR 验证，音频大小: ${audioBlob.size} bytes`)
+
+      const text = await transcribeFn(audioBlob)
+      console.log(`[WebRTC VAD] ASR 识别结果: "${text}"`)
+
+      const words = getWakeWords()
+      const matchedWord = words.find(word => text?.toLowerCase().includes(word.toLowerCase()))
+
+      if (matchedWord) {
+        console.log(`[WebRTC VAD] 匹配到中断词: "${matchedWord}"`)
+        onWakeWordDetected?.(matchedWord)
+        return true
+      } else {
+        console.log(`[WebRTC VAD] 未匹配到中断词`)
+        return false
+      }
+    } catch (error) {
+      console.error('[WebRTC VAD] ASR 验证失败:', error)
+      return false
+    } finally {
+      isCheckingWakeWord.value = false
+      audioChunks = []
+    }
   }
 
   /**
@@ -114,9 +208,17 @@ export function useWebRTCVAD(options: WebRTCVADOptions = {}) {
 
       // 连续检测到语音，触发开始
       if (!isSpeaking.value && speechFrameCount >= speechFrames) {
-        console.log('[WebRTC VAD] 检测到语音开始')
+        const words = getWakeWords()
+        console.log('[WebRTC VAD] 检测到语音开始, 中断词:', words)
         isSpeaking.value = true
-        onSpeechStart?.()
+
+        // 如果配置了中断词，开始录音
+        if (words.length > 0 && transcribeFn) {
+          startRecording()
+        } else {
+          // 没有中断词要求，直接触发回调
+          onSpeechStart?.()
+        }
       }
     } else {
       silenceFrameCount++
@@ -126,6 +228,18 @@ export function useWebRTCVAD(options: WebRTCVADOptions = {}) {
       if (isSpeaking.value && silenceFrameCount >= silenceFrames) {
         console.log('[WebRTC VAD] 检测到语音结束')
         isSpeaking.value = false
+
+        // 如果配置了中断词，进行验证
+        const words = getWakeWords()
+        if (words.length > 0 && transcribeFn) {
+          // 异步验证中断词
+          verifyWakeWord().then((matched) => {
+            if (matched) {
+              onSpeechStart?.()  // 匹配到中断词才触发打断
+            }
+          })
+        }
+
         onSpeechEnd?.()
       }
     }
@@ -142,11 +256,11 @@ export function useWebRTCVAD(options: WebRTCVADOptions = {}) {
     console.log('[WebRTC VAD] 启动中...')
 
     try {
-      // 获取麦克风
+      // 获取麦克风（关闭降噪以提高检测灵敏度）
       mediaStream = await navigator.mediaDevices.getUserMedia({
         audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
+          echoCancellation: true,   // 保留回声消除，过滤 TTS 声音
+          noiseSuppression: false,  // 关闭降噪，提高检测灵敏度
           autoGainControl: true,
         }
       })
@@ -210,6 +324,7 @@ export function useWebRTCVAD(options: WebRTCVADOptions = {}) {
   return {
     isActive,
     isSpeaking,
+    isCheckingWakeWord,
     start,
     stop,
   }

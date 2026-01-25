@@ -14,7 +14,7 @@ export interface VADOptions {
   triggerCount?: number | (() => number)   // 触发次数
   ignoreTime?: number | (() => number)     // 忽略时间 (ms)
   wakeWord?: string                        // 唤醒词（如 "小智"），设置后启用唤醒词模式
-  wakeWords?: string[]                     // 唤醒词列表（支持多个同音字）
+  wakeWords?: string[] | (() => string[])  // 唤醒词列表（支持数组或返回数组的函数）
   wakeWordTimeout?: number                 // 唤醒词录音时长 (ms)，默认 1500
   transcribeFn?: (blob: Blob) => Promise<string>  // ASR 识别函数
   onSpeechStart?: () => void
@@ -39,8 +39,13 @@ function getOptionValue<T>(option: T | (() => T) | undefined, defaultValue: T): 
 export function useVAD(options: VADOptions = {}) {
   const { onSpeechStart, onSpeechEnd, onWakeWordDetected, wakeWord, wakeWords, transcribeFn } = options
 
-  // 合并单个唤醒词和唤醒词列表
-  const allWakeWords = wakeWords || (wakeWord ? [wakeWord] : [])
+  // 获取唤醒词列表（支持函数或数组）
+  function getWakeWords(): string[] {
+    if (typeof wakeWords === 'function') return wakeWords()
+    if (wakeWords) return wakeWords
+    if (wakeWord) return [wakeWord]
+    return []
+  }
 
   // 动态获取配置值
   const getThreshold = () => getOptionValue(options.threshold, 60)
@@ -77,7 +82,7 @@ export function useVAD(options: VADOptions = {}) {
       mediaStream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints })
 
       // 如果启用了唤醒词模式，预先创建录音用的 MediaStream
-      if (allWakeWords.length > 0 && transcribeFn) {
+      if (getWakeWords().length > 0 && transcribeFn) {
         recordStream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints })
         console.log('[VAD] Record stream ready for wake word detection (echo cancellation enabled)')
       }
@@ -94,8 +99,8 @@ export function useVAD(options: VADOptions = {}) {
       consecutiveCount = 0
 
       console.log('[VAD] Started, ignoring input for', getIgnoreTime(), 'ms')
-      if (allWakeWords.length > 0) {
-        console.log('[VAD] Wake word mode enabled:', allWakeWords.join(', '))
+      if (getWakeWords().length > 0) {
+        console.log('[VAD] Wake word mode enabled:', getWakeWords().join(', '))
       }
       monitor()
     } catch (error) {
@@ -180,11 +185,11 @@ export function useVAD(options: VADOptions = {}) {
             console.log('[VAD] Wake word ASR result:', text)
 
             // 检查是否包含任意一个唤醒词
-            const detectedWord = allWakeWords.find(word => text && text.includes(word))
+            const detectedWord = getWakeWords().find(word => text && text.includes(word))
             if (detectedWord) {
               console.log('[VAD] Wake word detected:', detectedWord)
               onWakeWordDetected?.()
-              onSpeechStart?.()
+              onSpeechStart?.()  // 匹配到唤醒词才触发打断
             } else {
               console.log('[VAD] Wake word not found in:', text)
             }
@@ -251,8 +256,8 @@ export function useVAD(options: VADOptions = {}) {
       if (consecutiveCount >= triggerCount && !isSpeaking.value) {
         console.log(`[VAD] Speech detected! level=${average}, threshold=${threshold}, count=${consecutiveCount}`)
 
-        // 唤醒词模式：录音识别
-        if (allWakeWords.length > 0 && transcribeFn) {
+        // 唤醒词模式：录音识别后再触发
+        if (getWakeWords().length > 0 && transcribeFn) {
           startWakeWordDetection()
         } else {
           // 直接打断模式

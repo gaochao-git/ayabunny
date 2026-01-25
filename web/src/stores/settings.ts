@@ -37,8 +37,8 @@ export const TTS_VOICES = [
 export const VAD_TYPES = [
   { id: 'simple', name: '简单音量检测', desc: '基于音量阈值，低延迟' },
   { id: 'webrtc', name: 'WebRTC VAD', desc: '频谱分析，轻量准确' },
-  { id: 'silero', name: 'Silero VAD', desc: '前端AI模型' },
-  { id: 'funasr', name: 'FunASR VAD', desc: '服务端AI模型，最准确' },
+  { id: 'silero', name: 'Silero VAD', desc: '后端AI模型，轻量准确' },
+  { id: 'funasr', name: 'FunASR VAD', desc: '后端AI模型，最准确' },
 ] as const
 
 export type VADType = typeof VAD_TYPES[number]['id']
