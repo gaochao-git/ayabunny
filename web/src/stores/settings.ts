@@ -84,6 +84,7 @@ export const useSettingsStore = defineStore('settings', () => {
   // ========== TTS 语音合成 ==========
   const ttsEnabled = ref(initial.ttsEnabled ?? true)                // 启用 TTS
   const ttsVoice = ref(initial.ttsVoice ?? 'alex')                  // 声音选择
+  const ttsCustomVoiceId = ref<string | null>(initial.ttsCustomVoiceId ?? null)  // 自定义音色 ID
   const ttsGain = ref(initial.ttsGain ?? 10)                        // 音量增益 (1-20x)
 
   // ========== VAD 打断检测 ==========
@@ -113,6 +114,7 @@ export const useSettingsStore = defineStore('settings', () => {
       // TTS
       ttsEnabled: ttsEnabled.value,
       ttsVoice: ttsVoice.value,
+      ttsCustomVoiceId: ttsCustomVoiceId.value,
       ttsGain: ttsGain.value,
       // VAD
       vadEnabled: vadEnabled.value,
@@ -132,7 +134,7 @@ export const useSettingsStore = defineStore('settings', () => {
     [
       asrService, silenceThreshold, silenceDuration, autoSend,
       llmModel, llmTemperature, llmMaxTokens, llmMaxHistory,
-      ttsEnabled, ttsVoice, ttsGain,
+      ttsEnabled, ttsVoice, ttsCustomVoiceId, ttsGain,
       vadEnabled, vadType, vadThreshold, vadTriggerCount, vadIgnoreTime,
       background, avatar,
     ],
@@ -154,6 +156,7 @@ export const useSettingsStore = defineStore('settings', () => {
     // TTS
     ttsEnabled,
     ttsVoice,
+    ttsCustomVoiceId,
     ttsGain,
     // VAD
     vadEnabled,

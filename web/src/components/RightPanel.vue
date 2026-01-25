@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useSettingsStore, ASR_SERVICES, LLM_MODELS, TTS_VOICES, VAD_TYPES, BACKGROUNDS, AVATARS } from '@/stores/settings'
 import { getStories, createStory, updateStory, deleteStory, generateStory, type Story } from '@/api/skills'
+import { getCustomVoices, createCustomVoice, deleteCustomVoice, testCustomVoice, getVoiceAudioUrl, type CustomVoice } from '@/api/tts'
 
 const settings = useSettingsStore()
 
@@ -41,6 +42,191 @@ const tooltips = {
   vadThreshold: '打断检测的音量阈值。（仅简单模式）',
   vadTriggerCount: '连续检测到多少次超过阈值才触发打断。',
   vadIgnoreTime: 'AI开始说话后忽略麦克风输入的时间。',
+}
+
+// ========== 自定义音色相关 ==========
+const customVoices = ref<CustomVoice[]>([])
+const isLoadingVoices = ref(false)
+const isRecording = ref(false)
+const recordingTime = ref(0)
+const newVoiceName = ref('')
+const showVoiceRecorder = ref(false)
+
+let mediaRecorder: MediaRecorder | null = null
+let recordedChunks: Blob[] = []
+let recordingTimer: number | null = null
+
+// 合并的音色选项（预设 + 自定义）
+const allVoiceOptions = computed(() => {
+  const preset = TTS_VOICES.map(v => ({
+    id: v.id,
+    name: v.name,
+    isCustom: false,
+  }))
+  const custom = customVoices.value.map(v => ({
+    id: `custom:${v.id}`,
+    name: `🎤 ${v.name}`,
+    isCustom: true,
+  }))
+  return [...preset, ...custom]
+})
+
+// 当前选中的音色 ID（处理自定义音色前缀）
+const selectedVoiceId = computed({
+  get: () => {
+    if (settings.ttsCustomVoiceId) {
+      return `custom:${settings.ttsCustomVoiceId}`
+    }
+    return settings.ttsVoice
+  },
+  set: (val: string) => {
+    if (val.startsWith('custom:')) {
+      settings.ttsCustomVoiceId = val.replace('custom:', '')
+      settings.ttsVoice = 'alex'  // 默认值
+    } else {
+      settings.ttsCustomVoiceId = null
+      settings.ttsVoice = val
+    }
+  },
+})
+
+async function loadCustomVoices() {
+  isLoadingVoices.value = true
+  try {
+    customVoices.value = await getCustomVoices()
+  } catch (error) {
+    console.error('Failed to load custom voices:', error)
+  } finally {
+    isLoadingVoices.value = false
+  }
+}
+
+async function startRecording() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+    mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' })
+    recordedChunks = []
+
+    mediaRecorder.ondataavailable = (e) => {
+      if (e.data.size > 0) {
+        recordedChunks.push(e.data)
+      }
+    }
+
+    mediaRecorder.onstop = async () => {
+      console.log('[Voice] 录制停止，时长:', recordingTime.value, '秒')
+      stream.getTracks().forEach(track => track.stop())
+      if (recordingTimer) {
+        clearInterval(recordingTimer)
+        recordingTimer = null
+      }
+    }
+
+    // 每秒收集一次数据，确保录制稳定
+    mediaRecorder.start(1000)
+    isRecording.value = true
+    recordingTime.value = 0
+
+    // 计时器
+    recordingTimer = window.setInterval(() => {
+      recordingTime.value++
+    }, 1000)
+
+    console.log('[Voice] 开始录制音色')
+  } catch (error) {
+    console.error('Failed to start recording:', error)
+    alert('无法访问麦克风')
+  }
+}
+
+async function stopRecording() {
+  if (!mediaRecorder) return
+
+  console.log('[Voice] 停止录制，收集音频数据...')
+  return new Promise<Blob>((resolve) => {
+    mediaRecorder!.onstop = () => {
+      const blob = new Blob(recordedChunks, { type: 'audio/webm' })
+      console.log('[Voice] 音频数据收集完成，大小:', blob.size, 'bytes')
+      if (recordingTimer) {
+        clearInterval(recordingTimer)
+        recordingTimer = null
+      }
+      resolve(blob)
+    }
+    mediaRecorder!.stop()
+    isRecording.value = false
+  })
+}
+
+async function handleSaveVoice() {
+  console.log('[Voice] 用户点击保存，录制时长:', recordingTime.value, '秒')
+
+  if (!newVoiceName.value.trim()) {
+    alert('请输入音色名称')
+    return
+  }
+
+  const audioBlob = await stopRecording()
+  if (!audioBlob || audioBlob.size === 0) {
+    alert('录音失败，请重试')
+    return
+  }
+
+  try {
+    console.log('[Voice] 上传音色:', newVoiceName.value.trim(), '大小:', audioBlob.size)
+    await createCustomVoice(audioBlob, newVoiceName.value.trim())
+    newVoiceName.value = ''
+    showVoiceRecorder.value = false
+    await loadCustomVoices()
+    alert('音色创建成功！')
+  } catch (error: any) {
+    console.error('Failed to create voice:', error)
+    alert('创建失败: ' + (error.message || '未知错误'))
+  }
+}
+
+function handleCancelRecording() {
+  if (mediaRecorder && isRecording.value) {
+    mediaRecorder.stop()
+  }
+  isRecording.value = false
+  recordingTime.value = 0
+  newVoiceName.value = ''
+  showVoiceRecorder.value = false
+}
+
+async function handleDeleteVoice(voice: CustomVoice) {
+  if (!confirm(`确定要删除音色「${voice.name}」吗？`)) return
+  try {
+    await deleteCustomVoice(voice.id)
+    // 如果删除的是当前选中的音色，重置为预设
+    if (settings.ttsCustomVoiceId === voice.id) {
+      settings.ttsCustomVoiceId = null
+    }
+    await loadCustomVoices()
+  } catch (error) {
+    console.error('Failed to delete voice:', error)
+    alert('删除失败')
+  }
+}
+
+async function handleTestVoice(voice: CustomVoice) {
+  try {
+    const audioData = await testCustomVoice(voice.id)
+    const audioBlob = new Blob([audioData], { type: 'audio/mpeg' })
+    const audioUrl = URL.createObjectURL(audioBlob)
+    const audio = new Audio(audioUrl)
+    audio.play()
+  } catch (error) {
+    console.error('Failed to test voice:', error)
+    alert('测试失败')
+  }
+}
+
+function formatTime(seconds: number): string {
+  const m = Math.floor(seconds / 60)
+  const s = seconds % 60
+  return `${m}:${s.toString().padStart(2, '0')}`
 }
 
 // ========== 故事管理相关 ==========
@@ -146,8 +332,21 @@ function switchTab(tab: TabType) {
 }
 
 onMounted(() => {
+  // 加载自定义音色
+  loadCustomVoices()
+
   if (activeTab.value === 'stories') {
     loadStories()
+  }
+})
+
+onUnmounted(() => {
+  // 清理录音资源
+  if (recordingTimer) {
+    clearInterval(recordingTimer)
+  }
+  if (mediaRecorder && isRecording.value) {
+    mediaRecorder.stop()
   }
 })
 </script>
@@ -291,8 +490,13 @@ onMounted(() => {
               <div class="flex justify-between items-center mb-2">
                 <span class="text-sm text-gray-600">声音</span>
               </div>
-              <select v-model="settings.ttsVoice" class="w-full px-2 py-1.5 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-yellow-500">
-                <option v-for="voice in TTS_VOICES" :key="voice.id" :value="voice.id">{{ voice.name }}</option>
+              <select v-model="selectedVoiceId" class="w-full px-2 py-1.5 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-yellow-500">
+                <optgroup label="预设音色">
+                  <option v-for="voice in TTS_VOICES" :key="voice.id" :value="voice.id">{{ voice.name }}</option>
+                </optgroup>
+                <optgroup v-if="customVoices.length > 0" label="自定义音色">
+                  <option v-for="voice in customVoices" :key="voice.id" :value="`custom:${voice.id}`">🎤 {{ voice.name }}</option>
+                </optgroup>
               </select>
             </div>
             <div class="bg-white border rounded-lg p-2 cursor-help" :title="tooltips.ttsGain">
@@ -301,6 +505,107 @@ onMounted(() => {
                 <span class="text-sm font-medium">{{ settings.ttsGain }}x</span>
               </div>
               <input type="range" v-model.number="settings.ttsGain" min="1" max="20" class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-yellow-500" />
+            </div>
+          </div>
+
+          <!-- 自定义音色管理 -->
+          <div class="bg-white border rounded-lg p-3">
+            <div class="flex justify-between items-center mb-2">
+              <span class="text-sm text-gray-600">自定义音色</span>
+              <button
+                v-if="!showVoiceRecorder"
+                @click="showVoiceRecorder = true"
+                class="flex items-center gap-1 px-2 py-1 bg-yellow-100 hover:bg-yellow-200 text-yellow-700 text-xs rounded-lg transition-colors"
+              >
+                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+                </svg>
+                录制音色
+              </button>
+            </div>
+
+            <!-- 录音界面 -->
+            <div v-if="showVoiceRecorder" class="space-y-2 mb-3 p-2 bg-yellow-50 rounded-lg">
+              <input
+                v-model="newVoiceName"
+                type="text"
+                placeholder="输入音色名称"
+                class="w-full px-2 py-1.5 border rounded text-sm focus:outline-none focus:ring-2 focus:ring-yellow-500"
+                :disabled="isRecording"
+              />
+              <div class="flex items-center gap-2">
+                <button
+                  v-if="!isRecording"
+                  @click="startRecording"
+                  class="flex-1 flex items-center justify-center gap-1 px-3 py-2 bg-red-500 hover:bg-red-600 text-white text-sm rounded-lg transition-colors"
+                >
+                  <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                    <circle cx="12" cy="12" r="6" />
+                  </svg>
+                  开始录制
+                </button>
+                <template v-else>
+                  <div class="flex-1 flex items-center gap-2 px-3 py-2 bg-red-100 rounded-lg">
+                    <div class="w-2 h-2 bg-red-500 rounded-full animate-pulse"></div>
+                    <span class="text-sm text-red-600">录制中 {{ formatTime(recordingTime) }}</span>
+                  </div>
+                  <button
+                    @click="handleSaveVoice"
+                    :disabled="recordingTime < 3"
+                    class="px-3 py-2 bg-green-500 hover:bg-green-600 disabled:bg-gray-300 text-white text-sm rounded-lg transition-colors"
+                    :title="recordingTime < 3 ? '至少录制3秒' : ''"
+                  >
+                    保存
+                  </button>
+                </template>
+                <button
+                  @click="handleCancelRecording"
+                  class="px-3 py-2 bg-gray-200 hover:bg-gray-300 text-gray-600 text-sm rounded-lg transition-colors"
+                >
+                  取消
+                </button>
+              </div>
+              <p class="text-xs text-gray-500">💡 请说一段10-30秒的话语作为参考音频</p>
+            </div>
+
+            <!-- 自定义音色列表 -->
+            <div v-if="customVoices.length > 0" class="space-y-1">
+              <div
+                v-for="voice in customVoices"
+                :key="voice.id"
+                class="flex items-center justify-between p-2 bg-gray-50 rounded-lg"
+              >
+                <div class="flex items-center gap-2 min-w-0">
+                  <span class="text-sm">🎤</span>
+                  <span class="text-sm text-gray-700 truncate">{{ voice.name }}</span>
+                </div>
+                <div class="flex items-center gap-1 flex-shrink-0">
+                  <button
+                    @click="handleTestVoice(voice)"
+                    class="p-1 hover:bg-yellow-100 rounded transition-colors"
+                    title="试听"
+                  >
+                    <svg class="w-4 h-4 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                  </button>
+                  <button
+                    @click="handleDeleteVoice(voice)"
+                    class="p-1 hover:bg-red-100 rounded transition-colors"
+                    title="删除"
+                  >
+                    <svg class="w-4 h-4 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- 空状态 -->
+            <div v-else-if="!showVoiceRecorder" class="text-center py-3">
+              <p class="text-xs text-gray-400">还没有自定义音色</p>
             </div>
           </div>
         </section>

@@ -86,8 +86,8 @@ export function useChat() {
     let fullResponse = ''
     let pendingSentence = ''  // 待发送的句子缓冲
 
-    // 句子结束符正则
-    const sentenceEnders = /[。！？.!?\n]/
+    // 句子结束符正则（包含逗号，更细粒度分句加快首次播放）
+    const sentenceEnders = /[。！？.!?\n，,；;：:]/
 
     try {
       // 流式获取响应

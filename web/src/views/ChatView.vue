@@ -43,6 +43,7 @@ const backgroundStyle = computed(() => ({
 ttsPlayer = useTTSPlayer({
   gain: () => settings.ttsGain,
   voice: () => settings.ttsVoice,
+  customVoiceId: () => settings.ttsCustomVoiceId,
   onPlayStart: async () => {
     console.log('[TTS] 开始播放')
     // 通话中，播放时启动 VAD 检测打断
@@ -135,11 +136,16 @@ const sileroVAD = useSileroVAD({
   onSpeechStart: handleVADSpeechStart,
 })
 
-// FunASR VAD（基于服务端 AI 模型）
+// FunASR VAD（基于服务端 AI 模型 + 中断词验证）
 const funasrVAD = useFunASRVAD({
   wsUrl: 'ws://127.0.0.1:10096',  // FunASR 流式服务 WebSocket 地址
   ignoreTime: () => settings.vadIgnoreTime,
+  wakeWords: wakeWords,  // 中断词列表
+  transcribeFn: transcribeForWakeWord,  // ASR 识别函数
   onSpeechStart: handleVADSpeechStart,
+  onWakeWordDetected: (word, text) => {
+    console.log(`[FunASR VAD] 中断词匹配: "${word}" (原文: "${text}")`)
+  },
 })
 
 // 统一 VAD 接口
@@ -211,9 +217,20 @@ const canSend = computed(() => inputText.value.trim() && !chat.isLoading.value)
 
 // 状态文字（通话中显示）
 const statusText = computed(() => {
-  if (sileroVAD.isLoading.value) return '加载VAD模型...'
+  if (sileroVAD.isLoading.value || funasrVAD.isConnecting.value) return '加载VAD模型...'
   if (callRecorder.isRecording.value) return '正在听...'
-  if (ttsPlayer.isPlaying.value || ttsPlayer.isPending.value) return '正在说...'
+  // TTS 播放时，检查 VAD 状态
+  if (ttsPlayer.isPlaying.value || ttsPlayer.isPending.value) {
+    // 正在验证中断词
+    if (funasrVAD.isCheckingWakeWord.value) {
+      return '验证中断词...'
+    }
+    // VAD 检测到语音
+    if (funasrVAD.isSpeaking.value || sileroVAD.isSpeaking.value || webrtcVAD.isSpeaking.value || simpleVAD.isSpeaking.value) {
+      return '检测到语音...'
+    }
+    return '正在说...'
+  }
   if (chat.isLoading.value) return '思考中...'
   if (isProcessingCall.value) return '处理中...'
   return '等待说话...'
@@ -479,14 +496,21 @@ function clearChat() {
 
             <!-- 状态指示 -->
             <div class="flex gap-2 mt-3">
-              <span class="w-2.5 h-2.5 rounded-full bg-green-400"></span>
+              <span class="w-2.5 h-2.5 rounded-full bg-green-400" title="已连接"></span>
               <span
                 class="w-2.5 h-2.5 rounded-full transition-colors"
                 :class="callRecorder.isRecording.value ? 'bg-pink-400 animate-pulse' : 'bg-gray-300'"
+                title="录音状态"
               ></span>
               <span
                 class="w-2.5 h-2.5 rounded-full transition-colors"
                 :class="ttsPlayer.isPlaying.value ? 'bg-orange-400 animate-pulse' : 'bg-gray-300'"
+                title="播放状态"
+              ></span>
+              <span
+                class="w-2.5 h-2.5 rounded-full transition-colors"
+                :class="(funasrVAD.isActive.value || sileroVAD.isActive.value) ? 'bg-blue-400 animate-pulse' : 'bg-gray-300'"
+                title="VAD检测"
               ></span>
             </div>
 
