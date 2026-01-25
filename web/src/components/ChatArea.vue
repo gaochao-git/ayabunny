@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { ref, watch, nextTick } from 'vue'
-import type { Message } from '@/composables/useChat'
+import type { Message, ToolCall } from '@/composables/useChat'
 
 const props = defineProps<{
   messages: Message[]
   streamingContent: string
   isLoading: boolean
+  currentSkill?: string | null
+  toolCalls?: ToolCall[]  // 当前正在进行的工具调用
 }>()
 
 const containerRef = ref<HTMLDivElement | null>(null)
@@ -36,6 +38,30 @@ watch(
       <!-- 助手消息 -->
       <div v-if="message.role === 'assistant'" class="flex flex-col">
         <span class="text-xs text-gray-400 mb-1 ml-1">小智</span>
+        <!-- 工具调用记录（调试用） -->
+        <div
+          v-if="message.toolCalls && message.toolCalls.length > 0"
+          class="mb-2 max-w-[90%]"
+        >
+          <div
+            v-for="(tool, idx) in message.toolCalls"
+            :key="idx"
+            class="bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 mb-1 text-xs"
+          >
+            <div class="flex items-center gap-1 text-blue-600 font-medium">
+              <span>🔧</span>
+              <span>{{ tool.name }}</span>
+              <span class="text-blue-400">({{ tool.status === 'done' ? '完成' : '运行中' }})</span>
+            </div>
+            <div class="mt-1 text-gray-600">
+              <div><span class="text-gray-400">参数:</span> {{ JSON.stringify(tool.input) }}</div>
+              <div v-if="tool.output" class="mt-1">
+                <span class="text-gray-400">结果:</span>
+                <span class="text-green-600">{{ tool.output.slice(0, 100) }}{{ tool.output.length > 100 ? '...' : '' }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
         <div class="bg-white rounded-2xl rounded-tl-sm px-4 py-3 shadow-sm max-w-[85%]">
           <p class="whitespace-pre-wrap text-sm leading-relaxed text-gray-700">
             {{ message.content }}
@@ -49,6 +75,33 @@ watch(
           <p class="whitespace-pre-wrap text-sm leading-relaxed">
             {{ message.content }}
           </p>
+        </div>
+      </div>
+    </div>
+
+    <!-- 正在进行的工具调用（流式时显示） -->
+    <div v-if="toolCalls && toolCalls.length > 0" class="flex flex-col message-enter">
+      <span class="text-xs text-gray-400 mb-1 ml-1">小智</span>
+      <div class="max-w-[90%]">
+        <div
+          v-for="(tool, idx) in toolCalls"
+          :key="idx"
+          class="bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 mb-1 text-xs"
+        >
+          <div class="flex items-center gap-1 text-blue-600 font-medium">
+            <span class="animate-spin" v-if="tool.status === 'running'">⚙️</span>
+            <span v-else>🔧</span>
+            <span>{{ tool.name }}</span>
+            <span v-if="tool.status === 'running'" class="text-blue-400 animate-pulse">调用中...</span>
+            <span v-else class="text-green-500">✓ 完成</span>
+          </div>
+          <div class="mt-1 text-gray-600">
+            <div><span class="text-gray-400">参数:</span> {{ JSON.stringify(tool.input) }}</div>
+            <div v-if="tool.output" class="mt-1">
+              <span class="text-gray-400">结果:</span>
+              <span class="text-green-600">{{ tool.output.slice(0, 100) }}{{ tool.output.length > 100 ? '...' : '' }}</span>
+            </div>
+          </div>
         </div>
       </div>
     </div>

@@ -540,6 +540,8 @@ function clearChat() {
             :messages="chat.messages.value"
             :streaming-content="chat.streamingContent.value"
             :is-loading="chat.isLoading.value"
+            :current-skill="chat.currentSkill.value"
+            :tool-calls="chat.toolCalls.value"
             class="flex-1 min-h-0"
           />
           <!-- 无消息时显示欢迎界面 -->

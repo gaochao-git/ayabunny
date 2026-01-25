@@ -60,12 +60,15 @@ def get_all_story_ids() -> list[str]:
 
 @tool
 def tell_story(story_name: str = "") -> str:
-    """讲一个故事给用户听。
+    """从故事库读取并讲述一个故事。这是唯一获取故事内容的方式！
+
+    **重要**：你没有故事内容，必须调用此工具才能获取故事！禁止自己编写故事！
 
     **必须调用此工具的场景**：
     - 用户说"讲个故事"、"讲故事"、"想听故事"
     - 用户说"睡前故事"、"童话故事"
     - 用户提到具体故事名，如"讲小红帽"、"三只小猪的故事"
+    - 用户从故事列表中选择了某个故事
 
     Args:
         story_name: 故事名称（可选）。不指定则随机讲一个故事。
@@ -123,9 +126,10 @@ def list_stories() -> str:
         return "目前没有可用的故事。"
 
     stories_info = []
-    for story_id in story_ids:
+    for idx, story_id in enumerate(story_ids, 1):
         story = load_story(story_id)
         if story:
-            stories_info.append(f"- {story['title']}")
+            stories_info.append(story['title'])
 
-    return f"目前有以下故事可以听：\n" + "\n".join(stories_info)
+    # 用顿号分隔，更适合语音朗读
+    return f"目前有以下故事可以听：{' 、'.join(stories_info)}。"

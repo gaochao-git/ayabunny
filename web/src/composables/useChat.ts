@@ -6,13 +6,18 @@ import { ref, computed } from 'vue'
 import { streamChat, type ChatMessage, type ChatEvent, type ChatOptions } from '@/api/chat'
 import { useSettingsStore } from '@/stores/settings'
 
+export interface ToolCall {
+  name: string
+  input: Record<string, unknown>
+  output?: string
+  status: 'running' | 'done'
+  timestamp: number
+}
+
 export interface Message extends ChatMessage {
   id: string
   timestamp: number
-  skill?: {
-    name: string
-    status: 'pending' | 'running' | 'done'
-  }
+  toolCalls?: ToolCall[]  // 工具调用记录
 }
 
 export function useChat() {
@@ -20,6 +25,7 @@ export function useChat() {
   const isLoading = ref(false)
   const currentSkill = ref<string | null>(null)
   const streamingContent = ref('')
+  const toolCalls = ref<ToolCall[]>([])  // 当前响应的工具调用记录
 
   // 用于取消请求
   let abortController: AbortController | null = null
@@ -90,6 +96,7 @@ export function useChat() {
     isLoading.value = true
     streamingContent.value = ''
     currentSkill.value = null
+    toolCalls.value = []  // 清空工具调用记录
 
     let fullResponse = ''
     let pendingSentence = ''  // 待发送的句子缓冲
@@ -141,9 +148,16 @@ export function useChat() {
         onSentence(pendingSentence.trim())
       }
 
-      // 添加完整的助手消息
+      // 添加完整的助手消息（包含工具调用记录）
       if (fullResponse) {
-        addAssistantMessage(fullResponse)
+        const message: Message = {
+          id: generateId(),
+          role: 'assistant',
+          content: fullResponse,
+          timestamp: Date.now(),
+          toolCalls: toolCalls.value.length > 0 ? [...toolCalls.value] : undefined,
+        }
+        messages.value.push(message)
       }
 
       return fullResponse
@@ -181,9 +195,26 @@ export function useChat() {
     switch (event.type) {
       case 'skill_start':
         currentSkill.value = event.name || null
+        // 记录工具调用开始
+        toolCalls.value.push({
+          name: event.name || 'unknown',
+          input: event.input || {},
+          status: 'running',
+          timestamp: Date.now(),
+        })
+        console.log(`[Tool] 调用工具: ${event.name}`, event.input)
         break
       case 'skill_end':
         currentSkill.value = null
+        // 更新工具调用结果
+        const lastCall = toolCalls.value.find(
+          t => t.name === event.name && t.status === 'running'
+        )
+        if (lastCall) {
+          lastCall.status = 'done'
+          lastCall.output = event.output
+        }
+        console.log(`[Tool] 工具返回: ${event.name}`, event.output?.slice(0, 200))
         break
       case 'error':
         console.error('Chat error:', event.message)
@@ -205,6 +236,7 @@ export function useChat() {
     isLoading,
     currentSkill,
     streamingContent,
+    toolCalls,  // 当前工具调用记录
     send,
     abort,  // 取消当前请求
     clear,
