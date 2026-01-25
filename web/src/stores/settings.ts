@@ -85,6 +85,7 @@ export const useSettingsStore = defineStore('settings', () => {
   const ttsEnabled = ref(initial.ttsEnabled ?? true)                // 启用 TTS
   const ttsVoice = ref(initial.ttsVoice ?? 'alex')                  // 声音选择
   const ttsCustomVoiceId = ref<string | null>(initial.ttsCustomVoiceId ?? null)  // 自定义音色 ID
+  const ttsSpeed = ref(initial.ttsSpeed ?? 1.0)                     // 语速 (0.5-2.0)
   const ttsGain = ref(initial.ttsGain ?? 10)                        // 音量增益 (1-20x)
 
   // ========== VAD 打断检测 ==========
@@ -97,6 +98,7 @@ export const useSettingsStore = defineStore('settings', () => {
   // ========== 外观设置 ==========
   const background = ref<BackgroundType>(initial.background ?? 'sunset')  // 背景主题
   const avatar = ref<AvatarType>(initial.avatar ?? 'rabbit-girl')         // 角色形象
+  const assistantName = ref(initial.assistantName ?? '小智')              // 助手名字
 
   // 保存设置
   function save(): void {
@@ -115,6 +117,7 @@ export const useSettingsStore = defineStore('settings', () => {
       ttsEnabled: ttsEnabled.value,
       ttsVoice: ttsVoice.value,
       ttsCustomVoiceId: ttsCustomVoiceId.value,
+      ttsSpeed: ttsSpeed.value,
       ttsGain: ttsGain.value,
       // VAD
       vadEnabled: vadEnabled.value,
@@ -125,6 +128,7 @@ export const useSettingsStore = defineStore('settings', () => {
       // 外观
       background: background.value,
       avatar: avatar.value,
+      assistantName: assistantName.value,
     }
     localStorage.setItem('voice-chat-settings', JSON.stringify(settings))
   }
@@ -134,9 +138,9 @@ export const useSettingsStore = defineStore('settings', () => {
     [
       asrService, silenceThreshold, silenceDuration, autoSend,
       llmModel, llmTemperature, llmMaxTokens, llmMaxHistory,
-      ttsEnabled, ttsVoice, ttsCustomVoiceId, ttsGain,
+      ttsEnabled, ttsVoice, ttsCustomVoiceId, ttsSpeed, ttsGain,
       vadEnabled, vadType, vadThreshold, vadTriggerCount, vadIgnoreTime,
-      background, avatar,
+      background, avatar, assistantName,
     ],
     save,
     { deep: true }
@@ -157,6 +161,7 @@ export const useSettingsStore = defineStore('settings', () => {
     ttsEnabled,
     ttsVoice,
     ttsCustomVoiceId,
+    ttsSpeed,
     ttsGain,
     // VAD
     vadEnabled,
@@ -167,6 +172,7 @@ export const useSettingsStore = defineStore('settings', () => {
     // 外观
     background,
     avatar,
+    assistantName,
     // Methods
     save,
   }

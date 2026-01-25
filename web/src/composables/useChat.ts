@@ -80,6 +80,7 @@ export function useChat() {
       model: settings.llmModel,
       temperature: settings.llmTemperature,
       maxTokens: settings.llmMaxTokens,
+      assistantName: settings.assistantName,
       signal: abortController.signal,  // 传递 AbortSignal
     }
 
@@ -93,8 +94,11 @@ export function useChat() {
     let fullResponse = ''
     let pendingSentence = ''  // 待发送的句子缓冲
 
-    // 句子结束符正则（包含逗号，更细粒度分句加快首次播放）
-    const sentenceEnders = /[。！？.!?\n，,；;：:]/
+    // 分句策略：强分隔符立即触发，弱分隔符需要累积一定长度
+    const strongEnders = /[。！？.!?\n]/  // 强分隔符：句子结束
+    const weakEnders = /[，,；;：:]/       // 弱分隔符：短暂停顿
+    const minLengthForWeak = 15           // 弱分隔符触发的最小长度
+    const maxBufferLength = 50            // 最大缓冲长度（避免长句等太久）
 
     try {
       // 流式获取响应
@@ -105,16 +109,27 @@ export function useChat() {
           fullResponse += event.content
           streamingContent.value = fullResponse
 
-          // 流式 TTS：检测句子结束符
+          // 流式 TTS：智能分句
           if (onSentence) {
             pendingSentence += event.content
 
-            // 检查是否有句子结束符
-            if (sentenceEnders.test(event.content)) {
-              const sentence = pendingSentence.trim()
-              if (sentence.length > 0) {
-                onSentence(sentence)
-              }
+            // 检查是否触发 TTS
+            const isStrongEnd = strongEnders.test(event.content)
+            const isWeakEnd = weakEnders.test(event.content)
+            const sentence = pendingSentence.trim()
+
+            // 触发条件：
+            // 1. 强分隔符（句号等）：立即触发
+            // 2. 弱分隔符（逗号等）+ 长度达到阈值：触发
+            // 3. 缓冲区超过最大长度：强制触发
+            const shouldTrigger = sentence.length > 0 && (
+              isStrongEnd ||
+              (isWeakEnd && sentence.length >= minLengthForWeak) ||
+              sentence.length >= maxBufferLength
+            )
+
+            if (shouldTrigger) {
+              onSentence(sentence)
               pendingSentence = ''
             }
           }

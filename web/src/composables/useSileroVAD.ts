@@ -12,8 +12,8 @@ export interface SileroVADOptions {
   onSpeechStart?: () => void
   /** 语音结束回调，返回音频数据 */
   onSpeechEnd?: (audio: Float32Array) => void
-  /** 唤醒词列表 */
-  wakeWords?: string[]
+  /** 唤醒词列表（支持数组或返回数组的函数） */
+  wakeWords?: string[] | (() => string[])
   /** ASR 识别函数（用于唤醒词检测） */
   transcribeFn?: (blob: Blob) => Promise<string>
   /** 唤醒词检测到时回调 */
@@ -37,6 +37,12 @@ export function useSileroVAD(options: SileroVADOptions = {}) {
   function getIgnoreTime(): number {
     if (typeof ignoreTime === 'function') return ignoreTime()
     return ignoreTime ?? 800
+  }
+
+  // 获取唤醒词列表（支持函数或固定值）
+  function getWakeWords(): string[] {
+    if (typeof wakeWords === 'function') return wakeWords()
+    return wakeWords ?? []
   }
 
   /**
@@ -88,7 +94,8 @@ export function useSileroVAD(options: SileroVADOptions = {}) {
    * 检测唤醒词
    */
   async function checkWakeWord(audioData: Float32Array): Promise<boolean> {
-    if (!wakeWords?.length || !transcribeFn) return true // 没有唤醒词要求，直接通过
+    const words = getWakeWords()
+    if (!words.length || !transcribeFn) return true // 没有唤醒词要求，直接通过
 
     isCheckingWakeWord.value = true
     try {
@@ -98,7 +105,7 @@ export function useSileroVAD(options: SileroVADOptions = {}) {
       const text = await transcribeFn(wavBlob)
       console.log('[SileroVAD] ASR 结果:', text)
 
-      const detected = wakeWords.some(word => text?.includes(word))
+      const detected = words.some(word => text?.includes(word))
       if (detected) {
         console.log('[SileroVAD] 检测到唤醒词')
         onWakeWordDetected?.()
@@ -136,7 +143,7 @@ export function useSileroVAD(options: SileroVADOptions = {}) {
           console.log('[SileroVAD] 检测到语音开始')
           isSpeaking.value = true
           // 如果没有唤醒词要求，直接触发回调
-          if (!wakeWords?.length) {
+          if (!getWakeWords().length) {
             onSpeechStart?.()
           }
         },
@@ -151,7 +158,7 @@ export function useSileroVAD(options: SileroVADOptions = {}) {
           isSpeaking.value = false
 
           // 如果有唤醒词要求，先检测
-          if (wakeWords?.length && transcribeFn) {
+          if (getWakeWords().length && transcribeFn) {
             const hasWakeWord = await checkWakeWord(audio)
             if (hasWakeWord) {
               onSpeechStart?.() // 唤醒词匹配，触发开始

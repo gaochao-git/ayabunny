@@ -18,8 +18,8 @@ export interface FunASRVADOptions {
   onWakeWordDetected?: (word: string, text: string) => void
   /** 启动后忽略检测的时间 (ms) */
   ignoreTime?: number | (() => number)
-  /** 中断词列表 */
-  wakeWords?: string[]
+  /** 中断词列表（支持数组或返回数组的函数） */
+  wakeWords?: string[] | (() => string[])
   /** ASR 识别函数（用于中断词验证） */
   transcribeFn?: (blob: Blob) => Promise<string>
 }
@@ -53,6 +53,11 @@ export function useFunASRVAD(options: FunASRVADOptions = {}) {
   // 获取忽略时间
   function getIgnoreTime(): number {
     return typeof ignoreTime === 'function' ? ignoreTime() : ignoreTime
+  }
+
+  // 获取中断词列表
+  function getWakeWords(): string[] {
+    return typeof wakeWords === 'function' ? wakeWords() : wakeWords
   }
 
   /**
@@ -130,9 +135,10 @@ export function useFunASRVAD(options: FunASRVADOptions = {}) {
    * 检查文本是否包含中断词
    */
   function checkWakeWords(text: string): string | null {
-    if (!text || wakeWords.length === 0) return null
+    const words = getWakeWords()
+    if (!text || words.length === 0) return null
     const lowerText = text.toLowerCase()
-    for (const word of wakeWords) {
+    for (const word of words) {
       if (lowerText.includes(word.toLowerCase())) {
         return word
       }
@@ -241,7 +247,7 @@ export function useFunASRVAD(options: FunASRVADOptions = {}) {
           ws.send(pcmData.buffer)
 
           // 如果正在说话，缓存音频用于中断词识别
-          if (isSpeaking.value && wakeWords.length > 0 && transcribeFn) {
+          if (isSpeaking.value && getWakeWords().length > 0 && transcribeFn) {
             audioChunks.push(pcmData)
             // 限制缓冲区大小（最多 3 秒）
             const maxChunks = Math.ceil(16000 * 3 / 4096)
@@ -271,7 +277,7 @@ export function useFunASRVAD(options: FunASRVADOptions = {}) {
               audioChunks = []  // 清空缓冲区，开始新的录制
 
               // 如果没有配置中断词，直接触发回调
-              if (wakeWords.length === 0 || !transcribeFn) {
+              if (getWakeWords().length === 0 || !transcribeFn) {
                 onSpeechStart?.()
               }
             }
@@ -284,7 +290,7 @@ export function useFunASRVAD(options: FunASRVADOptions = {}) {
               isSpeaking.value = false
 
               // 如果配置了中断词，进行验证
-              if (wakeWords.length > 0 && transcribeFn) {
+              if (getWakeWords().length > 0 && transcribeFn) {
                 const speechDuration = Date.now() - speechStartTime
                 console.log(`[FunASR VAD] 语音时长: ${speechDuration}ms`)
 

@@ -26,6 +26,7 @@ class ChatRequest(BaseModel):
     model: str | None = None
     temperature: float | None = None
     max_tokens: int | None = None
+    assistant_name: str | None = None  # 助手名字
 
 
 def build_messages(message: str, history: list[ChatMessage]) -> list:
@@ -46,6 +47,7 @@ async def stream_agent_response(
     model: str | None = None,
     temperature: float | None = None,
     max_tokens: int | None = None,
+    assistant_name: str | None = None,
 ) -> AsyncGenerator[str, None]:
     """
     流式生成 Agent 响应
@@ -57,7 +59,7 @@ async def stream_agent_response(
     - done: 响应完成
     - error: 发生错误
     """
-    agent = get_agent(model=model, temperature=temperature, max_tokens=max_tokens)
+    agent = get_agent(model=model, temperature=temperature, max_tokens=max_tokens, assistant_name=assistant_name)
     messages = build_messages(message, history)
 
     try:
@@ -120,6 +122,7 @@ async def chat(request: ChatRequest):
             model=request.model,
             temperature=request.temperature,
             max_tokens=request.max_tokens,
+            assistant_name=request.assistant_name,
         ),
         media_type="text/event-stream",
         headers={

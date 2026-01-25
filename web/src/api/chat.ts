@@ -20,6 +20,7 @@ export interface ChatOptions {
   model?: string
   temperature?: number
   maxTokens?: number
+  assistantName?: string  // 助手名字
   signal?: AbortSignal  // 用于取消请求
 }
 
@@ -42,6 +43,7 @@ export async function* streamChat(
       model: options.model,
       temperature: options.temperature,
       max_tokens: options.maxTokens,
+      assistant_name: options.assistantName,
     }),
     signal: options.signal,  // 传递 AbortSignal
   })

@@ -25,6 +25,7 @@ class TTSRequest(BaseModel):
     text: str
     voice: str = "alex"  # IndexTTS-2 音色或自定义音色 ID
     custom_voice_id: Optional[str] = None  # 自定义音色 ID（优先级高于 voice）
+    speed: float = 1.0  # 语速 (0.5-2.0)
 
 
 class CustomVoice(BaseModel):
@@ -95,7 +96,8 @@ async def synthesize(request: TTSRequest):
             payload = {
                 "model": settings.TTS_MODEL,
                 "input": request.text,
-                "response_format": "mp3"
+                "response_format": "mp3",
+                "speed": max(0.5, min(2.0, request.speed)),  # 限制在 0.5-2.0 范围
             }
 
             # 如果有参考音频，使用音色克隆模式

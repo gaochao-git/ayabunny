@@ -6,6 +6,7 @@ export interface TTSOptions {
   text: string
   voice?: string  // IndexTTS-2 音色: alex, benjamin, charles, david, anna, bella, claire, diana
   customVoiceId?: string  // 自定义音色 ID（优先级高于 voice）
+  speed?: number  // 语速 (0.5-2.0)，默认 1.0
 }
 
 export interface CustomVoice {
@@ -30,6 +31,7 @@ export async function synthesize(options: TTSOptions): Promise<ArrayBuffer> {
       text: options.text,
       voice: options.voice || 'alex',
       custom_voice_id: options.customVoiceId,
+      speed: options.speed ?? 1.0,
     }),
   })
 

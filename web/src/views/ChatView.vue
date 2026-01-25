@@ -44,6 +44,7 @@ ttsPlayer = useTTSPlayer({
   gain: () => settings.ttsGain,
   voice: () => settings.ttsVoice,
   customVoiceId: () => settings.ttsCustomVoiceId,
+  speed: () => settings.ttsSpeed,
   onPlayStart: async () => {
     console.log('[TTS] 开始播放')
     // 通话中，播放时启动 VAD 检测打断
@@ -77,18 +78,21 @@ async function transcribeForWakeWord(blob: Blob): Promise<string> {
 }
 
 // VAD 语音打断检测（仅通话中使用，支持唤醒词模式）
-// 打断词/唤醒词列表
-const wakeWords = [
-  // 唤醒词（同音字）
-  '小智', '小志', '小知', '小之', '乔治',
-  // 打断词
-  '等等', '等一下', '等会', '等会儿',
-  '停', '停一下', '停停', '暂停',
-  '不对', '不是', '不要', '不用',
-  '好了', '可以了', '行了', '够了',
-  '听我说', '我说', '我想说',
-  '安静', '别说了', '闭嘴',
-]
+// 打断词/唤醒词列表（动态包含助手名字）
+const getWakeWords = () => {
+  const name = settings.assistantName || '小智'
+  return [
+    // 助手名字（用户设置的）
+    name,
+    // 打断词
+    '等等', '等一下', '等会', '等会儿',
+    '停', '停一下', '停停', '暂停',
+    '不对', '不是', '不要', '不用',
+    '好了', '可以了', '行了', '够了',
+    '听我说', '我说', '我想说',
+    '安静', '别说了', '闭嘴',
+  ]
+}
 
 // 通用的打断处理函数
 function handleVADSpeechStart() {
@@ -110,11 +114,11 @@ const simpleVAD = useVAD({
   threshold: () => settings.vadThreshold,
   triggerCount: () => settings.vadTriggerCount,
   ignoreTime: () => settings.vadIgnoreTime,
-  wakeWords: wakeWords,
+  wakeWords: getWakeWords,
   wakeWordTimeout: 1500,
   transcribeFn: transcribeForWakeWord,
   onWakeWordDetected: () => {
-    console.log('[SimpleVAD] 唤醒词"小智"检测到！')
+    console.log('[SimpleVAD] 唤醒词检测到！')
   },
   onSpeechStart: handleVADSpeechStart,
 })
@@ -127,11 +131,11 @@ const webrtcVAD = useWebRTCVAD({
 
 // Silero VAD（基于前端 AI 模型）
 const sileroVAD = useSileroVAD({
-  wakeWords: wakeWords,
+  wakeWords: getWakeWords,
   transcribeFn: transcribeForWakeWord,
   ignoreTime: () => settings.vadIgnoreTime,
   onWakeWordDetected: () => {
-    console.log('[SileroVAD] 唤醒词"小智"检测到！')
+    console.log('[SileroVAD] 唤醒词检测到！')
   },
   onSpeechStart: handleVADSpeechStart,
 })
@@ -140,7 +144,7 @@ const sileroVAD = useSileroVAD({
 const funasrVAD = useFunASRVAD({
   wsUrl: 'ws://127.0.0.1:10096',  // FunASR 流式服务 WebSocket 地址
   ignoreTime: () => settings.vadIgnoreTime,
-  wakeWords: wakeWords,  // 中断词列表
+  wakeWords: getWakeWords,  // 中断词列表（动态获取，包含助手名字）
   transcribeFn: transcribeForWakeWord,  // ASR 识别函数
   onSpeechStart: handleVADSpeechStart,
   onWakeWordDetected: (word, text) => {
@@ -423,7 +427,7 @@ function clearChat() {
         <!-- 头部 -->
         <header class="flex-shrink-0 bg-gradient-to-r from-pink-400 via-pink-500 to-orange-400 px-4 h-14 flex items-center justify-between safe-top">
           <div class="flex items-center gap-2">
-            <span class="text-white text-lg font-semibold">小智</span>
+            <span class="text-white text-lg font-semibold">{{ settings.assistantName || '小智' }}</span>
           </div>
           <div class="flex items-center gap-2">
             <button
@@ -535,7 +539,7 @@ function clearChat() {
           <!-- 无消息时显示欢迎界面 -->
           <div v-else class="flex-1 flex flex-col items-center justify-center text-center px-8">
             <div class="text-6xl mb-4">{{ currentAvatar.icon }}</div>
-            <h2 class="text-xl font-semibold text-gray-700 mb-2">你好，我是小智</h2>
+            <h2 class="text-xl font-semibold text-gray-700 mb-2">你好，我是{{ settings.assistantName || '小智' }}</h2>
             <p class="text-gray-500 text-sm mb-6">点击电话按钮开始语音对话，或直接输入文字</p>
           </div>
         </template>

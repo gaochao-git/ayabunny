@@ -36,6 +36,7 @@ const tooltips = {
   llmMaxTokens: '限制AI单次回复的最大长度。',
   llmMaxHistory: '保留多少轮对话历史作为上下文。',
   ttsVoice: '选择语音合成的声音角色。',
+  ttsSpeed: '调整语音播放速度。0.5=慢速，1.0=正常，2.0=快速。',
   ttsGain: '放大语音播放的音量。',
   vadEnabled: '开启后，当AI说话时如果检测到你在说话，会自动停止播放。',
   vadType: '选择语音活动检测方式。',
@@ -499,6 +500,13 @@ onUnmounted(() => {
                 </optgroup>
               </select>
             </div>
+            <div class="bg-white border rounded-lg p-2 cursor-help" :title="tooltips.ttsSpeed">
+              <div class="flex justify-between items-center mb-2">
+                <span class="text-sm text-gray-600">语速</span>
+                <span class="text-sm font-medium">{{ settings.ttsSpeed.toFixed(1) }}x</span>
+              </div>
+              <input type="range" v-model.number="settings.ttsSpeed" min="0.5" max="2" step="0.1" class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-yellow-500" />
+            </div>
             <div class="bg-white border rounded-lg p-2 cursor-help" :title="tooltips.ttsGain">
               <div class="flex justify-between items-center mb-2">
                 <span class="text-sm text-gray-600">音量增益</span>
@@ -700,6 +708,20 @@ onUnmounted(() => {
                   :title="bg.name"
                 ></button>
               </div>
+            </div>
+            <!-- 助手名字 -->
+            <div class="bg-white border rounded-lg p-2 sm:col-span-2">
+              <div class="flex justify-between items-center mb-2">
+                <span class="text-sm text-gray-600">助手名字</span>
+                <span class="text-xs text-gray-400">喊名字可打断</span>
+              </div>
+              <input
+                v-model="settings.assistantName"
+                type="text"
+                placeholder="给助手起个名字"
+                maxlength="10"
+                class="w-full px-3 py-1.5 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+              />
             </div>
           </div>
         </section>

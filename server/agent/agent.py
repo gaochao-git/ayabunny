@@ -53,7 +53,7 @@ def load_skill(skill_id: str) -> str:
 技能已加载，你现在可以使用该技能的工具了。"""
 
 
-def build_system_prompt() -> str:
+def build_system_prompt(assistant_name: str = "小智") -> str:
     """构建系统提示词，包含技能摘要"""
     # 发现技能
     discover_skills()
@@ -61,13 +61,14 @@ def build_system_prompt() -> str:
     # 获取技能摘要
     skills_summary = get_skills_summary()
 
-    return f"""你是一个友好的语音助手，专门为小朋友服务。
+    return f"""你是一个友好的语音助手，名字叫"{assistant_name}"，专门为小朋友服务。
 
 你的特点：
 - 语言温柔、有耐心
 - 善于用生动有趣的方式与小朋友互动
 - 会根据小朋友的反应调整语气和节奏
 - 说话时适当使用语气词
+- 当小朋友叫你"{assistant_name}"时，要热情地回应
 
 {skills_summary}
 
@@ -102,6 +103,7 @@ def create_agent(
     model: str | None = None,
     temperature: float | None = None,
     max_tokens: int | None = None,
+    assistant_name: str | None = None,
 ) -> Any:
     """创建 LangGraph Agent
 
@@ -109,6 +111,7 @@ def create_agent(
         model: 模型名称，默认使用配置中的 OPENAI_MODEL
         temperature: 温度参数，默认 0.7
         max_tokens: 最大输出 token 数
+        assistant_name: 助手名字
     """
     # 创建 LLM
     llm = ChatOpenAI(
@@ -127,8 +130,8 @@ def create_agent(
         list_stories,    # 列出故事工具
     ]
 
-    # 构建系统提示词（包含技能摘要）
-    system_prompt = build_system_prompt()
+    # 构建系统提示词（包含技能摘要和助手名字）
+    system_prompt = build_system_prompt(assistant_name or "小智")
 
     # 使用 LangGraph 创建 ReAct Agent
     agent = create_react_agent(
@@ -144,6 +147,7 @@ def get_agent(
     model: str | None = None,
     temperature: float | None = None,
     max_tokens: int | None = None,
+    assistant_name: str | None = None,
 ) -> Any:
     """获取 Agent（按配置缓存）
 
@@ -151,14 +155,15 @@ def get_agent(
         model: 模型名称
         temperature: 温度参数
         max_tokens: 最大输出 token 数
+        assistant_name: 助手名字
     """
     global _agent_cache
 
-    # 构建缓存键
-    cache_key = f"{model or 'default'}:{temperature}:{max_tokens}"
+    # 构建缓存键（包含助手名字）
+    cache_key = f"{model or 'default'}:{temperature}:{max_tokens}:{assistant_name or 'default'}"
 
     if cache_key not in _agent_cache:
-        _agent_cache[cache_key] = create_agent(model, temperature, max_tokens)
+        _agent_cache[cache_key] = create_agent(model, temperature, max_tokens, assistant_name)
 
     return _agent_cache[cache_key]
 

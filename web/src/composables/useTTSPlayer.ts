@@ -12,6 +12,7 @@ export interface TTSPlayerOptions {
   gain?: number | (() => number)      // 音量增益 (1-20x)
   voice?: string | (() => string)     // TTS 声音
   customVoiceId?: string | null | (() => string | null)  // 自定义音色 ID（优先级高于 voice）
+  speed?: number | (() => number)     // 语速 (0.5-2.0)
   onPlayStart?: () => void
   onPlayEnd?: () => void
 }
@@ -37,6 +38,7 @@ export function useTTSPlayer(options: TTSPlayerOptions = {}) {
   const getGain = () => getOptionValue(options.gain, 10)
   const getVoice = () => getOptionValue(options.voice, 'alex')
   const getCustomVoiceId = () => getOptionValue(options.customVoiceId, null)
+  const getSpeed = () => getOptionValue(options.speed, 1.0)
 
   const isPlaying = ref(false)
   const isPending = ref(false)
@@ -86,8 +88,9 @@ export function useTTSPlayer(options: TTSPlayerOptions = {}) {
   function startSynthesis(text: string): Promise<ArrayBuffer> {
     const voice = getVoice()
     const customVoiceId = getCustomVoiceId()
-    console.log(`[TTS] 开始预合成: "${text.slice(0, 20)}..." voice=${voice}`)
-    return synthesize({ text, voice, customVoiceId: customVoiceId || undefined })
+    const speed = getSpeed()
+    console.log(`[TTS] 开始预合成: "${text.slice(0, 20)}..." voice=${voice}, speed=${speed}`)
+    return synthesize({ text, voice, customVoiceId: customVoiceId || undefined, speed })
   }
 
   /**
