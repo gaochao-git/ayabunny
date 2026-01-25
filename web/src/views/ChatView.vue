@@ -302,6 +302,7 @@ function endCall() {
   isProcessingCall.value = false  // 重置处理状态
 
   // 停止所有活动
+  chat.abort()  // 取消 LLM 请求
   if (callRecorder.isRecording.value) {
     callRecorder.stopRecording()
   }

@@ -21,6 +21,9 @@ export function useChat() {
   const currentSkill = ref<string | null>(null)
   const streamingContent = ref('')
 
+  // 用于取消请求
+  let abortController: AbortController | null = null
+
   const history = computed<ChatMessage[]>(() =>
     messages.value.map(({ role, content }) => ({ role, content }))
   )
@@ -68,12 +71,16 @@ export function useChat() {
   async function send(content: string, onSentence?: (sentence: string) => void): Promise<string> {
     if (isLoading.value) return ''
 
+    // 创建新的 AbortController
+    abortController = new AbortController()
+
     // 获取 LLM 设置
     const settings = useSettingsStore()
     const chatOptions: ChatOptions = {
       model: settings.llmModel,
       temperature: settings.llmTemperature,
       maxTokens: settings.llmMaxTokens,
+      signal: abortController.signal,  // 传递 AbortSignal
     }
 
     // 添加用户消息
@@ -126,12 +133,29 @@ export function useChat() {
 
       return fullResponse
     } catch (error) {
+      // 忽略取消错误
+      if (error instanceof Error && error.name === 'AbortError') {
+        console.log('[Chat] 请求已取消')
+        return fullResponse
+      }
       console.error('Chat error:', error)
       throw error
     } finally {
       isLoading.value = false
       streamingContent.value = ''
       currentSkill.value = null
+      abortController = null
+    }
+  }
+
+  /**
+   * 取消当前请求
+   */
+  function abort(): void {
+    if (abortController) {
+      console.log('[Chat] 取消请求')
+      abortController.abort()
+      abortController = null
     }
   }
 
@@ -167,6 +191,7 @@ export function useChat() {
     currentSkill,
     streamingContent,
     send,
+    abort,  // 取消当前请求
     clear,
     addUserMessage,
     addAssistantMessage,
