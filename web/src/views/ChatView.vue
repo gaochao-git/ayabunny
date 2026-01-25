@@ -7,7 +7,7 @@ import { useVAD } from '@/composables/useVAD'
 import { useWebRTCVAD } from '@/composables/useWebRTCVAD'
 import { useSileroVAD } from '@/composables/useSileroVAD'
 import { useFunASRVAD } from '@/composables/useFunASRVAD'
-import { useSettingsStore } from '@/stores/settings'
+import { useSettingsStore, BACKGROUNDS, AVATARS } from '@/stores/settings'
 import { transcribe } from '@/api/asr'
 import ChatArea from '@/components/ChatArea.vue'
 import RightPanel from '@/components/RightPanel.vue'
@@ -25,6 +25,19 @@ const showSettings = ref(false)
 const isInCall = ref(false)       // 是否在通话中
 const isTranscribing = ref(false) // 是否正在语音转文字
 const isProcessingCall = ref(false) // 是否正在处理通话（防止并发）
+
+// 当前选择的背景和头像
+const currentBackground = computed(() =>
+  BACKGROUNDS.find(bg => bg.id === settings.background) || BACKGROUNDS[0]
+)
+const currentAvatar = computed(() =>
+  AVATARS.find(av => av.id === settings.avatar) || AVATARS[0]
+)
+
+// 背景样式
+const backgroundStyle = computed(() => ({
+  background: `linear-gradient(135deg, ${currentBackground.value.colors[0]} 0%, ${currentBackground.value.colors[1]} 50%, ${currentBackground.value.colors[2]} 100%)`
+}))
 
 // TTS 播放器
 ttsPlayer = useTTSPlayer({
@@ -63,8 +76,18 @@ async function transcribeForWakeWord(blob: Blob): Promise<string> {
 }
 
 // VAD 语音打断检测（仅通话中使用，支持唤醒词模式）
-// 唤醒词支持同音字：小智、小志、小知、乔治等
-const wakeWords = ['小智', '小志', '小知', '小之', '乔治']
+// 打断词/唤醒词列表
+const wakeWords = [
+  // 唤醒词（同音字）
+  '小智', '小志', '小知', '小之', '乔治',
+  // 打断词
+  '等等', '等一下', '等会', '等会儿',
+  '停', '停一下', '停停', '暂停',
+  '不对', '不是', '不要', '不用',
+  '好了', '可以了', '行了', '够了',
+  '听我说', '我说', '我想说',
+  '安静', '别说了', '闭嘴',
+]
 
 // 通用的打断处理函数
 function handleVADSpeechStart() {
@@ -186,17 +209,14 @@ const transcribeRecorder = useAudioRecorder({})
 // 计算属性
 const canSend = computed(() => inputText.value.trim() && !chat.isLoading.value)
 
-// 状态文字
+// 状态文字（通话中显示）
 const statusText = computed(() => {
-  if (isInCall.value) {
-    if (sileroVAD.isLoading.value) return '加载VAD模型...'
-    if (callRecorder.isRecording.value) return '正在听...'
-    if (ttsPlayer.isPlaying.value || ttsPlayer.isPending.value) return '正在说...'
-    if (chat.isLoading.value) return '思考中...'
-    if (isProcessingCall.value) return '处理中...'
-    return '等待说话...'
-  }
-  return '点击开始对话'
+  if (sileroVAD.isLoading.value) return '加载VAD模型...'
+  if (callRecorder.isRecording.value) return '正在听...'
+  if (ttsPlayer.isPlaying.value || ttsPlayer.isPending.value) return '正在说...'
+  if (chat.isLoading.value) return '思考中...'
+  if (isProcessingCall.value) return '处理中...'
+  return '等待说话...'
 })
 
 // ============ 文字模式 ============
@@ -363,36 +383,27 @@ function clearChat() {
 </script>
 
 <template>
-  <div class="min-h-screen cute-background flex items-center justify-center p-0 md:p-4 relative overflow-hidden">
-    <!-- 装饰性元素（手机端隐藏） -->
-    <div class="hidden md:block absolute inset-0 pointer-events-none overflow-hidden">
-      <!-- 星星 -->
+  <!-- 移动端：全屏布局 / 桌面端：居中卡片 -->
+  <div class="fixed inset-0 md:relative md:inset-auto md:min-h-screen md:flex md:items-center md:justify-center md:p-4" :style="backgroundStyle">
+    <!-- 装饰性元素（仅桌面端） -->
+    <div class="hidden md:block fixed inset-0 pointer-events-none overflow-hidden" :style="backgroundStyle">
       <div class="star" style="top: 15%; left: 15%; animation-delay: 0s;"></div>
       <div class="star" style="top: 25%; right: 20%; animation-delay: 1s;"></div>
       <div class="star" style="top: 70%; left: 10%; animation-delay: 2s;"></div>
       <div class="star" style="top: 80%; right: 15%; animation-delay: 0.5s;"></div>
-      <div class="star" style="top: 45%; left: 8%; animation-delay: 1.5s;"></div>
-      <div class="star" style="top: 60%; right: 8%; animation-delay: 2.5s;"></div>
-      <!-- 爱心 -->
       <div class="heart" style="top: 30%; left: 8%;"></div>
       <div class="heart" style="top: 65%; right: 12%;"></div>
-      <!-- 圆点 -->
-      <div class="dot" style="top: 40%; left: 5%; background: #FFB6C1;"></div>
-      <div class="dot" style="top: 50%; right: 6%; background: #87CEEB;"></div>
-      <div class="dot" style="top: 85%; left: 20%; background: #98FB98;"></div>
     </div>
 
-    <!-- 主卡片容器 -->
-    <div
-      class="bg-white md:rounded-3xl shadow-2xl flex relative z-10 overflow-hidden transition-all duration-300 w-full md:w-auto h-screen md:h-[85vh] md:max-h-[800px]"
-    >
-      <!-- 左侧：聊天区域 -->
+    <!-- 主容器 -->
+    <div class="h-full w-full md:h-[85vh] md:max-h-[800px] md:w-auto bg-white md:rounded-3xl md:shadow-2xl flex relative z-10 overflow-hidden">
+      <!-- 聊天区域 -->
       <div
-        class="flex flex-col flex-shrink-0 w-full md:w-[420px]"
+        class="flex-1 flex flex-col w-full md:w-[420px] md:flex-none"
         :class="{ 'hidden md:flex': showSettings }"
       >
         <!-- 头部 -->
-        <header class="bg-gradient-to-r from-pink-400 via-pink-500 to-orange-400 px-5 h-16 flex items-center justify-between">
+        <header class="flex-shrink-0 bg-gradient-to-r from-pink-400 via-pink-500 to-orange-400 px-4 h-14 flex items-center justify-between safe-top">
           <div class="flex items-center gap-2">
             <span class="text-white text-lg font-semibold">小智</span>
           </div>
@@ -418,79 +429,98 @@ function clearChat() {
           </div>
         </header>
 
-      <!-- 聊天区域 -->
-      <ChatArea
-        :messages="chat.messages.value"
-        :streaming-content="chat.streamingContent.value"
-        :is-loading="chat.isLoading.value"
-        class="flex-1 min-h-0"
-      />
+      <!-- 主内容区 - 根据模式显示不同内容 -->
+      <div class="flex-1 min-h-0 flex flex-col">
+        <!-- 通话中：显示角色头像 -->
+        <template v-if="isInCall">
+          <div class="flex-1 flex flex-col items-center justify-center bg-gradient-to-b from-white/50 to-white">
+            <!-- 角色头像区域 -->
+            <div class="relative">
+              <!-- 说话时的声波动效 -->
+              <div
+                v-if="ttsPlayer.isPlaying.value"
+                class="absolute inset-0 flex items-center justify-center"
+              >
+                <div class="absolute w-48 h-48 rounded-full bg-pink-200/30 animate-pulse"></div>
+                <div class="absolute w-40 h-40 rounded-full bg-pink-300/40 animate-ping-slow"></div>
+                <div class="absolute w-32 h-32 rounded-full bg-pink-400/30 animate-ping-slow animation-delay-200"></div>
+              </div>
 
-      <!-- 头像区域 -->
-      <div class="py-6 flex flex-col items-center bg-gradient-to-b from-pink-50 to-white">
-        <!-- 同心圆波纹 + 头像 -->
-        <div class="relative">
-          <!-- 外圈波纹（通话中显示） -->
-          <div
-            v-if="isInCall"
-            class="absolute inset-0 rounded-full border-2 border-pink-200"
-            :class="{ 'animate-ping-slow': callRecorder.isRecording.value || ttsPlayer.isPlaying.value }"
-            :style="{ transform: 'scale(1.6)', opacity: 0.3 }"
-          ></div>
-          <div
-            v-if="isInCall"
-            class="absolute inset-0 rounded-full border-2 border-pink-300"
-            :class="{ 'animate-ping-slow animation-delay-200': callRecorder.isRecording.value || ttsPlayer.isPlaying.value }"
-            :style="{ transform: 'scale(1.3)', opacity: 0.5 }"
-          ></div>
+              <!-- 录音时的波纹 -->
+              <div
+                v-if="callRecorder.isRecording.value"
+                class="absolute inset-0 flex items-center justify-center"
+              >
+                <div class="absolute w-44 h-44 rounded-full border-4 border-green-300/50 animate-ping-slow"></div>
+                <div class="absolute w-36 h-36 rounded-full border-4 border-green-400/60 animate-ping-slow animation-delay-200"></div>
+              </div>
 
-          <!-- 头像容器 -->
-          <div
-            class="w-28 h-28 rounded-full bg-gradient-to-br from-pink-50 to-orange-50 flex items-center justify-center cursor-pointer hover:scale-105 transition-transform overflow-hidden border-4 border-white shadow-lg"
-            @click="toggleCall"
-          >
-            <img
-              src="/rabbit.svg"
-              alt="小智"
-              class="w-full h-full object-cover"
-            />
+              <!-- 头像 -->
+              <div
+                class="relative w-36 h-36 md:w-44 md:h-44 rounded-full bg-gradient-to-br from-pink-50 to-orange-50 flex items-center justify-center cursor-pointer transition-all duration-300 overflow-hidden border-4 border-white shadow-xl scale-105"
+                :class="{ 'animate-bounce-slow': ttsPlayer.isPlaying.value }"
+                @click="toggleCall"
+              >
+                <img
+                  :src="currentAvatar.file"
+                  :alt="currentAvatar.name"
+                  class="w-full h-full object-cover"
+                />
+              </div>
+
+              <!-- 通话中红点 -->
+              <div class="absolute top-0 right-0 w-5 h-5 bg-red-500 rounded-full border-2 border-white animate-pulse"></div>
+            </div>
+
+            <!-- 状态文字 -->
+            <p class="mt-6 text-lg font-medium text-pink-600">
+              {{ statusText }}
+            </p>
+
+            <!-- 状态指示 -->
+            <div class="flex gap-2 mt-3">
+              <span class="w-2.5 h-2.5 rounded-full bg-green-400"></span>
+              <span
+                class="w-2.5 h-2.5 rounded-full transition-colors"
+                :class="callRecorder.isRecording.value ? 'bg-pink-400 animate-pulse' : 'bg-gray-300'"
+              ></span>
+              <span
+                class="w-2.5 h-2.5 rounded-full transition-colors"
+                :class="ttsPlayer.isPlaying.value ? 'bg-orange-400 animate-pulse' : 'bg-gray-300'"
+              ></span>
+            </div>
+
+            <!-- 音量显示（通话中） -->
+            <div class="mt-4 text-xs text-gray-400">
+              音量: {{ callRecorder.audioLevel.value }}
+            </div>
           </div>
+        </template>
 
-          <!-- 通话中红点 -->
-          <div
-            v-if="isInCall"
-            class="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full border-2 border-white animate-pulse"
-          ></div>
-        </div>
-
-        <!-- 状态文字 -->
-        <p class="mt-4 text-pink-500 text-sm font-medium">{{ statusText }}</p>
-
-        <!-- 状态指示点 -->
-        <div class="flex gap-1.5 mt-2">
-          <span
-            class="w-2 h-2 rounded-full transition-colors"
-            :class="isInCall ? 'bg-green-400' : 'bg-gray-300'"
-          ></span>
-          <span
-            class="w-2 h-2 rounded-full transition-colors"
-            :class="callRecorder.isRecording.value ? 'bg-pink-400 animate-pulse' : 'bg-gray-300'"
-          ></span>
-          <span
-            class="w-2 h-2 rounded-full transition-colors"
-            :class="ttsPlayer.isPlaying.value ? 'bg-orange-400 animate-pulse' : 'bg-gray-300'"
-          ></span>
-        </div>
+        <!-- 非通话时：显示聊天消息或欢迎界面 -->
+        <template v-else>
+          <!-- 有消息时显示聊天区域 -->
+          <ChatArea
+            v-if="chat.messages.value.length > 0 || chat.isLoading.value"
+            :messages="chat.messages.value"
+            :streaming-content="chat.streamingContent.value"
+            :is-loading="chat.isLoading.value"
+            class="flex-1 min-h-0"
+          />
+          <!-- 无消息时显示欢迎界面 -->
+          <div v-else class="flex-1 flex flex-col items-center justify-center text-center px-8">
+            <div class="text-6xl mb-4">{{ currentAvatar.icon }}</div>
+            <h2 class="text-xl font-semibold text-gray-700 mb-2">你好，我是小智</h2>
+            <p class="text-gray-500 text-sm mb-6">点击电话按钮开始语音对话，或直接输入文字</p>
+          </div>
+        </template>
       </div>
 
       <!-- 底部输入区 -->
-      <footer class="px-4 pb-4">
+      <footer class="flex-shrink-0 px-4 py-3 bg-white safe-bottom">
         <!-- 提示文字 -->
-        <div class="text-center text-xs text-gray-400 mb-3">
-          <span v-if="isInCall">
-            音量: {{ callRecorder.audioLevel.value }} | 说完自动识别
-          </span>
-          <span v-else>点击头像开始语音对话</span>
+        <div v-if="isInCall" class="text-center text-xs text-gray-400 mb-3">
+          说完自动识别 | 点击头像挂断
         </div>
 
         <!-- 输入框（按钮在内部） -->
@@ -500,7 +530,9 @@ function clearChat() {
             @keydown="handleKeydown"
             :disabled="chat.isLoading.value"
             placeholder="输入消息..."
-            class="flex-1 bg-transparent border-none outline-none text-sm text-gray-700 placeholder-gray-400 disabled:text-gray-400"
+            class="flex-1 bg-transparent border-none outline-none text-base text-gray-700 placeholder-gray-400 disabled:text-gray-400"
+            inputmode="text"
+            autocomplete="off"
           />
 
           <!-- 按钮组 -->
@@ -569,7 +601,6 @@ function clearChat() {
       <!-- 右侧：设置/故事面板 -->
       <RightPanel
         :show="showSettings"
-        :audio-level="isInCall ? callRecorder.audioLevel.value : transcribeRecorder.audioLevel.value"
         @close="showSettings = false"
       />
     </div>
@@ -577,51 +608,7 @@ function clearChat() {
 </template>
 
 <style scoped>
-/* 可爱的渐变背景 */
-.cute-background {
-  background: linear-gradient(135deg, #ffecd2 0%, #fcb69f 50%, #ffeaa7 100%);
-  position: relative;
-}
-
-/* 装饰性云朵 */
-.cute-background::before {
-  content: '';
-  position: absolute;
-  top: 10%;
-  left: 5%;
-  width: 120px;
-  height: 60px;
-  background: rgba(255, 255, 255, 0.6);
-  border-radius: 60px;
-  box-shadow:
-    40px 20px 0 rgba(255, 255, 255, 0.5),
-    -30px 10px 0 rgba(255, 255, 255, 0.4);
-  animation: float 6s ease-in-out infinite;
-}
-
-.cute-background::after {
-  content: '';
-  position: absolute;
-  top: 20%;
-  right: 10%;
-  width: 80px;
-  height: 40px;
-  background: rgba(255, 255, 255, 0.5);
-  border-radius: 40px;
-  box-shadow:
-    25px 15px 0 rgba(255, 255, 255, 0.4),
-    -20px 8px 0 rgba(255, 255, 255, 0.3);
-  animation: float 8s ease-in-out infinite reverse;
-}
-
-@keyframes float {
-  0%, 100% {
-    transform: translateY(0) translateX(0);
-  }
-  50% {
-    transform: translateY(-15px) translateX(10px);
-  }
-}
+/* 动画基础 */
 
 @keyframes ping-slow {
   0% {
@@ -640,6 +627,20 @@ function clearChat() {
 
 .animation-delay-200 {
   animation-delay: 0.2s;
+}
+
+/* 说话时的轻微弹跳动画 */
+@keyframes bounce-slow {
+  0%, 100% {
+    transform: translateY(0) scale(1.05);
+  }
+  50% {
+    transform: translateY(-8px) scale(1.08);
+  }
+}
+
+.animate-bounce-slow {
+  animation: bounce-slow 0.6s ease-in-out infinite;
 }
 
 /* 星星装饰 */

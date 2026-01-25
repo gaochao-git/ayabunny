@@ -43,6 +43,27 @@ export const VAD_TYPES = [
 
 export type VADType = typeof VAD_TYPES[number]['id']
 
+// 背景选项
+export const BACKGROUNDS = [
+  { id: 'sunset', name: '日落橙', colors: ['#ffecd2', '#fcb69f', '#ffeaa7'] },
+  { id: 'ocean', name: '海洋蓝', colors: ['#a8edea', '#fed6e3', '#d299c2'] },
+  { id: 'forest', name: '森林绿', colors: ['#d4fc79', '#96e6a1', '#dfe6e9'] },
+  { id: 'lavender', name: '薰衣草', colors: ['#e0c3fc', '#8ec5fc', '#f093fb'] },
+  { id: 'candy', name: '糖果粉', colors: ['#ffecd2', '#fcb69f', '#ff9a9e'] },
+] as const
+
+export type BackgroundType = typeof BACKGROUNDS[number]['id']
+
+// 角色选项（暂时都用 rabbit.svg，后续可添加更多角色图片）
+export const AVATARS = [
+  { id: 'rabbit-girl', name: '小兔妹妹', icon: '🐰', file: '/rabbit.svg' },
+  { id: 'rabbit-boy', name: '小兔弟弟', icon: '🐰', file: '/rabbit.svg' },
+  { id: 'cat-girl', name: '小猫姐姐', icon: '🐱', file: '/rabbit.svg' },
+  { id: 'bear-boy', name: '小熊哥哥', icon: '🐻', file: '/rabbit.svg' },
+] as const
+
+export type AvatarType = typeof AVATARS[number]['id']
+
 export const useSettingsStore = defineStore('settings', () => {
   // 从 localStorage 加载设置
   const stored = localStorage.getItem('voice-chat-settings')
@@ -72,6 +93,10 @@ export const useSettingsStore = defineStore('settings', () => {
   const vadTriggerCount = ref(initial.vadTriggerCount ?? 5)         // 触发次数 (2-10)，仅简单模式
   const vadIgnoreTime = ref(initial.vadIgnoreTime ?? 800)           // 忽略时间 (ms)
 
+  // ========== 外观设置 ==========
+  const background = ref<BackgroundType>(initial.background ?? 'sunset')  // 背景主题
+  const avatar = ref<AvatarType>(initial.avatar ?? 'rabbit-girl')         // 角色形象
+
   // 保存设置
   function save(): void {
     const settings = {
@@ -95,6 +120,9 @@ export const useSettingsStore = defineStore('settings', () => {
       vadThreshold: vadThreshold.value,
       vadTriggerCount: vadTriggerCount.value,
       vadIgnoreTime: vadIgnoreTime.value,
+      // 外观
+      background: background.value,
+      avatar: avatar.value,
     }
     localStorage.setItem('voice-chat-settings', JSON.stringify(settings))
   }
@@ -106,6 +134,7 @@ export const useSettingsStore = defineStore('settings', () => {
       llmModel, llmTemperature, llmMaxTokens, llmMaxHistory,
       ttsEnabled, ttsVoice, ttsGain,
       vadEnabled, vadType, vadThreshold, vadTriggerCount, vadIgnoreTime,
+      background, avatar,
     ],
     save,
     { deep: true }
@@ -132,6 +161,9 @@ export const useSettingsStore = defineStore('settings', () => {
     vadThreshold,
     vadTriggerCount,
     vadIgnoreTime,
+    // 外观
+    background,
+    avatar,
     // Methods
     save,
   }

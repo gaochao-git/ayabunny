@@ -1,13 +1,12 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { useSettingsStore, ASR_SERVICES, LLM_MODELS, TTS_VOICES, VAD_TYPES } from '@/stores/settings'
+import { useSettingsStore, ASR_SERVICES, LLM_MODELS, TTS_VOICES, VAD_TYPES, BACKGROUNDS, AVATARS } from '@/stores/settings'
 import { getStories, createStory, updateStory, deleteStory, generateStory, type Story } from '@/api/skills'
 
 const settings = useSettingsStore()
 
-const props = defineProps<{
+defineProps<{
   show: boolean
-  audioLevel?: number
 }>()
 
 const emit = defineEmits<{
@@ -156,10 +155,10 @@ onMounted(() => {
 <template>
   <div
     v-if="show"
-    class="w-full md:w-[480px] h-full flex-shrink-0 flex flex-col overflow-hidden"
+    class="absolute inset-0 md:relative md:inset-auto w-full md:w-[480px] h-full flex-shrink-0 flex flex-col overflow-hidden bg-white z-20"
   >
     <!-- 头部标题 -->
-    <div class="bg-gradient-to-r from-pink-400 via-pink-500 to-orange-400 px-5 h-16 flex items-center justify-between">
+    <div class="flex-shrink-0 bg-gradient-to-r from-pink-400 via-pink-500 to-orange-400 px-4 h-14 flex items-center justify-between safe-top">
       <div class="flex items-center gap-2">
         <!-- 手机端返回按钮 -->
         <button
@@ -211,12 +210,6 @@ onMounted(() => {
 
     <!-- 设置面板 -->
     <template v-if="activeTab === 'settings'">
-      <!-- 当前音量 -->
-      <div class="bg-gradient-to-r from-pink-400 to-orange-400 px-4 py-2 text-center">
-        <span class="text-white/80 text-xs">当前音量: </span>
-        <span class="text-white text-xl font-bold">{{ props.audioLevel ?? 0 }}</span>
-      </div>
-
       <!-- 设置内容 -->
       <div class="flex-1 overflow-y-auto p-4 pr-4 md:pr-6 space-y-3 bg-gray-50 md:border-l border-gray-200">
         <!-- ASR -->
@@ -352,6 +345,56 @@ onMounted(() => {
                 <span class="text-sm font-medium">{{ vadIgnoreTimeDisplay }}</span>
               </div>
               <input type="range" v-model.number="settings.vadIgnoreTime" min="300" max="1500" step="100" class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-red-500" />
+            </div>
+          </div>
+        </section>
+
+        <!-- 外观设置 -->
+        <section class="space-y-2">
+          <div class="inline-block px-2 py-0.5 rounded text-xs font-semibold bg-purple-100 text-purple-600">
+            ⑤ 外观设置
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <!-- 角色选择 -->
+            <div class="bg-white border rounded-lg p-2">
+              <div class="flex justify-between items-center mb-2">
+                <span class="text-sm text-gray-600">角色形象</span>
+              </div>
+              <div class="grid grid-cols-2 gap-1">
+                <button
+                  v-for="av in AVATARS"
+                  :key="av.id"
+                  @click="settings.avatar = av.id"
+                  :class="[
+                    'p-2 rounded-lg text-xs text-center transition-colors',
+                    settings.avatar === av.id
+                      ? 'bg-purple-100 text-purple-600 ring-2 ring-purple-400'
+                      : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
+                  ]"
+                >
+                  <span class="text-lg">{{ av.icon }}</span>
+                  <div>{{ av.name }}</div>
+                </button>
+              </div>
+            </div>
+            <!-- 背景选择 -->
+            <div class="bg-white border rounded-lg p-2">
+              <div class="flex justify-between items-center mb-2">
+                <span class="text-sm text-gray-600">背景主题</span>
+              </div>
+              <div class="grid grid-cols-5 gap-1">
+                <button
+                  v-for="bg in BACKGROUNDS"
+                  :key="bg.id"
+                  @click="settings.background = bg.id"
+                  :class="[
+                    'w-8 h-8 rounded-full transition-transform',
+                    settings.background === bg.id ? 'ring-2 ring-purple-400 scale-110' : 'hover:scale-105'
+                  ]"
+                  :style="{ background: `linear-gradient(135deg, ${bg.colors[0]}, ${bg.colors[1]})` }"
+                  :title="bg.name"
+                ></button>
+              </div>
             </div>
           </div>
         </section>
