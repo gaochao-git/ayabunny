@@ -26,8 +26,13 @@ export interface SileroVADOptions {
 }
 
 export function useSileroVAD(options: SileroVADOptions = {}) {
+  // 默认 WebSocket URL：通过当前 host 的 /ws/vad 端点
+  const defaultWsUrl = typeof window !== 'undefined'
+    ? `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/ws/vad`
+    : 'ws://127.0.0.1:6002/ws/vad'
+
   const {
-    wsUrl = 'ws://127.0.0.1:10097',
+    wsUrl = defaultWsUrl,
     onSpeechStart,
     onSpeechEnd,
     onWakeWordDetected,
@@ -239,8 +244,14 @@ export function useSileroVAD(options: SileroVADOptions = {}) {
         console.log(`[Silero VAD] 启动完成, 忽略时间: ${ignoreMs}ms, 中断词:`, getWakeWords())
 
         // 开始处理音频
+        let audioFrameCount = 0
         processor!.onaudioprocess = (e) => {
-          if (!ws || ws.readyState !== WebSocket.OPEN) return
+          if (!ws || ws.readyState !== WebSocket.OPEN) {
+            if (audioFrameCount > 0 && audioFrameCount % 100 === 0) {
+              console.log(`[Silero VAD] WebSocket 未就绪，跳过音频帧 ${audioFrameCount}`)
+            }
+            return
+          }
 
           const inputData = e.inputBuffer.getChannelData(0)
           // 重采样到 16kHz
@@ -249,6 +260,10 @@ export function useSileroVAD(options: SileroVADOptions = {}) {
 
           // 发送到 VAD 服务
           ws.send(pcmData.buffer)
+          audioFrameCount++
+          if (audioFrameCount === 1) {
+            console.log(`[Silero VAD] 开始发送音频，采样率: ${audioContext!.sampleRate}`)
+          }
 
           // 始终缓存音频用于中断词识别（环形缓冲区，保留最近 3 秒）
           if (getWakeWords().length > 0 && transcribeFn) {
@@ -327,8 +342,8 @@ export function useSileroVAD(options: SileroVADOptions = {}) {
         isLoading.value = false
       }
 
-      ws.onclose = () => {
-        console.log('[Silero VAD] WebSocket 已关闭')
+      ws.onclose = (event) => {
+        console.log(`[Silero VAD] WebSocket 已关闭, code=${event.code}, reason="${event.reason}"`)
         isActive.value = false
         isConnecting.value = false
         isLoading.value = false

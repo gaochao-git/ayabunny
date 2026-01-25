@@ -20,6 +20,12 @@ export default defineConfig({
         changeOrigin: true,
         secure: false,
       },
+      '/ws': {
+        target: 'ws://127.0.0.1:6002',
+        ws: true,
+        changeOrigin: true,
+        secure: false,
+      },
     },
   },
   // 注意：Silero VAD 现在通过后端 WebSocket 服务运行，不再需要 ONNX Runtime

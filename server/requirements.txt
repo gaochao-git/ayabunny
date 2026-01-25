@@ -20,8 +20,11 @@ python-dotenv>=1.0.0
 pydantic>=2.9.0
 pydantic-settings>=2.5.0
 
-# VAD
+# VAD (Silero VAD 通过 torch.hub 加载)
 websockets>=12.0
 torch>=2.0.0
 torchaudio>=2.0.0
-# silero-vad  # 通过 torch.hub 加载，无需单独安装
+numpy>=1.24.0
+
+# ASR (内置 Whisper)
+faster-whisper>=1.0.0

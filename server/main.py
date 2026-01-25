@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from config import get_settings
-from api import api_router
+from api import api_router, ws_router
 from agent.skills_loader import discover_skills
 
 settings = get_settings()
@@ -42,6 +42,8 @@ app.add_middleware(
 
 # 注册路由
 app.include_router(api_router)
+# WebSocket 路由（/ws/vad）
+app.include_router(ws_router, prefix="/ws", tags=["websocket"])
 
 
 @app.get("/")

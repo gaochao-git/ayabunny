@@ -134,9 +134,14 @@ const webrtcVAD = useWebRTCVAD({
   onSpeechStart: handleVADSpeechStart,
 })
 
-// Silero VAD（基于后端 AI 模型 + 中断词验证）
+// Silero VAD（内置后端，通过 /ws/vad 访问）
+// 构建 WebSocket URL：开发环境通过 Vite 代理，生产环境直接连后端
+const getVadWsUrl = () => {
+  const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
+  return `${protocol}//${location.host}/ws/vad`
+}
 const sileroVAD = useSileroVAD({
-  wsUrl: 'ws://127.0.0.1:10097',  // Silero VAD 服务 WebSocket 地址
+  wsUrl: getVadWsUrl(),  // 通过 Vite 代理或直连后端
   wakeWords: getWakeWords,  // 中断词列表（动态获取，包含助手名字）
   transcribeFn: transcribeForWakeWord,  // ASR 识别函数
   ignoreTime: () => settings.vadIgnoreTime,
