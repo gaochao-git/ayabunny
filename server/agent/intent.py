@@ -34,7 +34,7 @@ class ChatIntent(BaseModel):
 Intent = StoryIntent | ListStoriesIntent | ChatIntent
 
 
-# 意图识别 prompt
+# 意图识别 prompt（注意：大括号需要双写以避免被 .format() 解释）
 INTENT_PROMPT = """你是一个意图识别助手。分析用户输入，判断用户意图。
 
 ## 意图类型
@@ -55,9 +55,9 @@ INTENT_PROMPT = """你是一个意图识别助手。分析用户输入，判断�
 ## 输出格式
 
 返回 JSON，格式如下：
-- 讲故事：{"intent": "tell_story", "story_name": "故事名或null"}
-- 查列表：{"intent": "list_stories"}
-- 普通对话：{"intent": "chat"}
+- 讲故事：{{"intent": "tell_story", "story_name": "故事名或null"}}
+- 查列表：{{"intent": "list_stories"}}
+- 普通对话：{{"intent": "chat"}}
 
 ## 注意
 - story_name 只提取用户明确提到的故事名，如果用户只说"讲个故事"没指定，则为 null
