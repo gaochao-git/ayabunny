@@ -37,7 +37,8 @@ class Settings(BaseSettings):
 
     # VAD 配置
     # 可选: ten, webrtc, silero_torch, silero_onnx, funasr
-    VAD_BACKEND: str = "ten"
+    # webrtc 兼容性最好，不需要额外系统库
+    VAD_BACKEND: str = "webrtc"
 
     # 数据目录
     DATA_ROOT: str = os.path.join(os.path.dirname(__file__), "skills")
