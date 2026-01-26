@@ -10,7 +10,7 @@ class Settings(BaseSettings):
 
     # 服务配置
     HOST: str = "0.0.0.0"
-    PORT: int = 6002
+    PORT: int = 8888
     DEBUG: bool = True
 
     # CORS
@@ -21,13 +21,9 @@ class Settings(BaseSettings):
     OPENAI_BASE_URL: str = "https://api.siliconflow.cn/v1"
     OPENAI_MODEL: str = "Qwen/Qwen3-30B-A3B-Instruct-2507"
 
-    # ASR 配置
-    ASR_BASE_URL: str = "http://127.0.0.1:10095"
-
-    # 本地 ASR 服务开关（配置为 true 才加载模型）
-    WHISPER_ENABLED: bool = False  # 启用后加载 faster-whisper（~2GB 内存）
-    WHISPER_MODEL: str = "small"   # tiny/base/small/medium/large-v3
-    FUNASR_ENABLED: bool = False   # 启用后加载 FunASR（~1GB 内存）
+    # ASR 配置 (SiliconFlow SenseVoice)
+    ASR_BASE_URL: str = "https://api.siliconflow.cn/v1/audio/transcriptions"
+    ASR_MODEL: str = "FunAudioLLM/SenseVoiceSmall"
 
     # TTS 配置 (SiliconFlow IndexTTS-2 云端)
     TTS_BASE_URL: str = "https://api.siliconflow.cn/v1/audio/speech"

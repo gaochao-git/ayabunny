@@ -11,17 +11,17 @@ export default defineConfig({
     },
   },
   server: {
-    port: 6001,
+    port: 3300,
     host: true,  // 监听所有网络接口，允许局域网访问
     // https 由 basicSsl 插件提供
     proxy: {
       '/api': {
-        target: 'http://127.0.0.1:6002',
+        target: 'http://127.0.0.1:8888',
         changeOrigin: true,
         secure: false,
       },
       '/ws': {
-        target: 'ws://127.0.0.1:6002',
+        target: 'ws://127.0.0.1:8888',
         ws: true,
         changeOrigin: true,
         secure: false,

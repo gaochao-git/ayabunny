@@ -6,8 +6,6 @@ from config import get_settings
 
 settings = get_settings()
 
-SILICONFLOW_ASR_URL = "https://api.siliconflow.cn/v1/audio/transcriptions"
-SILICONFLOW_ASR_MODEL = "FunAudioLLM/SenseVoiceSmall"
 
 
 async def transcribe(audio_bytes: bytes, filename: str = "audio.webm") -> dict:
@@ -19,14 +17,14 @@ async def transcribe(audio_bytes: bytes, filename: str = "audio.webm") -> dict:
     async with aiohttp.ClientSession() as session:
         data = aiohttp.FormData()
         data.add_field('file', audio_bytes, filename=filename, content_type='audio/webm')
-        data.add_field('model', SILICONFLOW_ASR_MODEL)
+        data.add_field('model', settings.ASR_MODEL)
 
         headers = {'Authorization': f'Bearer {api_key}'}
 
         print(f"[ASR] SenseVoice 转写, 音频: {len(audio_bytes)} bytes")
 
         async with session.post(
-            SILICONFLOW_ASR_URL,
+            settings.ASR_BASE_URL,
             data=data,
             headers=headers,
             timeout=aiohttp.ClientTimeout(total=30)
