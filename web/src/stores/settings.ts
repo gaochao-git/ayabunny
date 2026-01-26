@@ -80,7 +80,7 @@ export type BackgroundType = typeof BACKGROUNDS[number]['id']
 // 角色选项（暂时都用 rabbit.svg，后续可添加更多角色图片）
 export const AVATARS = [
   { id: 'rabbit-girl', name: '小兔妹妹', icon: '🐰', file: '/rabbit.svg' },
-  { id: 'rabbit-boy', name: '小兔弟弟', icon: '🐰', file: '/rabbit.svg' },
+  { id: 'rabbit-boy', name: '小兔弟弟', icon: '🐇', file: '/rabbit.svg' },
   { id: 'cat-girl', name: '小猫姐姐', icon: '🐱', file: '/rabbit.svg' },
   { id: 'bear-boy', name: '小熊哥哥', icon: '🐻', file: '/rabbit.svg' },
 ] as const
@@ -125,6 +125,7 @@ export const useSettingsStore = defineStore('settings', () => {
   const background = ref<BackgroundType>(initial.background ?? 'sunset')  // 背景主题
   const avatar = ref<AvatarType>(initial.avatar ?? 'rabbit-girl')         // 角色形象
   const assistantName = ref(initial.assistantName ?? '小智')              // 助手名字
+  const assistantAliases = ref<string[]>(initial.assistantAliases ?? ['小知', '小志'])  // 同音词/别名
 
   // 保存设置
   function save(): void {
@@ -156,6 +157,7 @@ export const useSettingsStore = defineStore('settings', () => {
       background: background.value,
       avatar: avatar.value,
       assistantName: assistantName.value,
+      assistantAliases: assistantAliases.value,
     }
     localStorage.setItem('voice-chat-settings', JSON.stringify(settings))
   }
@@ -167,7 +169,7 @@ export const useSettingsStore = defineStore('settings', () => {
       llmModel, llmTemperature, llmMaxTokens, llmMaxHistory,
       ttsEnabled, ttsModel, ttsVoice, ttsCustomVoiceId, ttsSpeed, ttsGain,
       vadEnabled, vadType, vadThreshold, vadTriggerCount, vadIgnoreTime,
-      background, avatar, assistantName,
+      background, avatar, assistantName, assistantAliases,
     ],
     save,
     { deep: true }
@@ -201,6 +203,7 @@ export const useSettingsStore = defineStore('settings', () => {
     background,
     avatar,
     assistantName,
+    assistantAliases,
     // Methods
     save,
   }

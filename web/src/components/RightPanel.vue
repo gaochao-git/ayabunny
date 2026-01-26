@@ -18,6 +18,10 @@ const emit = defineEmits<{
 type TabType = 'settings' | 'stories'
 const activeTab = ref<TabType>('settings')
 
+// 设置子 Tab（基础/高级）
+type SettingsSubTab = 'basic' | 'advanced'
+const settingsSubTab = ref<SettingsSubTab>('basic')
+
 // ========== 设置相关 ==========
 const silenceDurationDisplay = computed(() => {
   return (settings.silenceDuration / 1000).toFixed(1) + 's'
@@ -26,6 +30,21 @@ const silenceDurationDisplay = computed(() => {
 const vadIgnoreTimeDisplay = computed(() => {
   return settings.vadIgnoreTime + 'ms'
 })
+
+// 同音词输入
+const aliasInput = ref('')
+
+function addAlias() {
+  const val = aliasInput.value.trim()
+  if (val && !settings.assistantAliases.includes(val)) {
+    settings.assistantAliases.push(val)
+  }
+  aliasInput.value = ''
+}
+
+function removeAlias(index: number) {
+  settings.assistantAliases.splice(index, 1)
+}
 
 const tooltips = {
   asrService: '选择语音识别服务。FunASR中文识别效果好；Whisper多语言支持好。',
@@ -427,8 +446,136 @@ onUnmounted(() => {
 
     <!-- 设置面板 -->
     <template v-if="activeTab === 'settings'">
-      <!-- 设置内容 -->
-      <div class="flex-1 overflow-y-auto p-4 pr-4 md:pr-6 space-y-3 bg-gray-50 md:border-l border-gray-200">
+      <!-- 设置子 Tab 切换 -->
+      <div class="bg-white md:border-l border-b border-gray-200 px-4 py-2 flex gap-4">
+        <button
+          @click="settingsSubTab = 'basic'"
+          :class="[
+            'text-sm font-medium transition-colors pb-1 border-b-2',
+            settingsSubTab === 'basic'
+              ? 'text-pink-500 border-pink-500'
+              : 'text-gray-400 border-transparent hover:text-gray-600'
+          ]"
+        >
+          基础配置
+        </button>
+        <button
+          @click="settingsSubTab = 'advanced'"
+          :class="[
+            'text-sm font-medium transition-colors pb-1 border-b-2',
+            settingsSubTab === 'advanced'
+              ? 'text-pink-500 border-pink-500'
+              : 'text-gray-400 border-transparent hover:text-gray-600'
+          ]"
+        >
+          高级配置
+        </button>
+      </div>
+
+      <!-- 基础配置 -->
+      <div v-if="settingsSubTab === 'basic'" class="flex-1 overflow-y-auto p-4 pr-4 md:pr-6 space-y-3 bg-gray-50 md:border-l border-gray-200">
+        <!-- 助手名字 -->
+        <section class="space-y-2">
+          <div class="inline-block px-2 py-0.5 rounded text-xs font-semibold bg-pink-100 text-pink-600">
+            助手名字
+          </div>
+          <div class="bg-white border rounded-lg p-3">
+            <div class="flex gap-3">
+              <!-- 名字 -->
+              <div class="w-24 flex-shrink-0">
+                <label class="text-xs text-gray-500 mb-1 block">名字</label>
+                <input
+                  v-model="settings.assistantName"
+                  type="text"
+                  placeholder="小智"
+                  maxlength="10"
+                  class="w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-pink-500"
+                />
+              </div>
+              <!-- 同音词 -->
+              <div class="flex-1 min-w-0">
+                <label class="text-xs text-gray-500 mb-1 block">同音词（回车添加）</label>
+                <div class="flex flex-wrap gap-1.5 p-2 border rounded-lg min-h-[42px] bg-white focus-within:ring-2 focus-within:ring-pink-500">
+                  <span
+                    v-for="(alias, index) in settings.assistantAliases"
+                    :key="index"
+                    class="inline-flex items-center gap-1 px-2 py-0.5 bg-pink-100 text-pink-600 text-sm rounded-full"
+                  >
+                    {{ alias }}
+                    <button
+                      @click="removeAlias(index)"
+                      class="w-4 h-4 flex items-center justify-center hover:bg-pink-200 rounded-full"
+                    >
+                      <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </span>
+                  <input
+                    v-model="aliasInput"
+                    @keydown.enter.prevent="addAlias"
+                    type="text"
+                    placeholder="输入同音词"
+                    class="flex-1 min-w-[80px] text-sm outline-none bg-transparent"
+                  />
+                </div>
+              </div>
+            </div>
+            <p class="text-xs text-gray-400 mt-2">喊名字或同音词都可以打断 AI 说话</p>
+          </div>
+        </section>
+
+        <!-- 角色形象 -->
+        <section class="space-y-2">
+          <div class="inline-block px-2 py-0.5 rounded text-xs font-semibold bg-purple-100 text-purple-600">
+            角色形象
+          </div>
+          <div class="bg-white border rounded-lg p-3">
+            <div class="flex justify-center gap-3">
+              <button
+                v-for="av in AVATARS"
+                :key="av.id"
+                @click="settings.avatar = av.id"
+                :class="[
+                  'w-12 h-12 rounded-full flex items-center justify-center text-2xl transition-all',
+                  settings.avatar === av.id
+                    ? 'bg-purple-100 ring-2 ring-purple-400 scale-110'
+                    : 'bg-gray-50 hover:bg-gray-100 hover:scale-105'
+                ]"
+                :title="av.name"
+              >
+                {{ av.icon }}
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <!-- 背景主题 -->
+        <section class="space-y-2">
+          <div class="inline-block px-2 py-0.5 rounded text-xs font-semibold bg-orange-100 text-orange-600">
+            背景主题
+          </div>
+          <div class="bg-white border rounded-lg p-3">
+            <div class="flex gap-3 justify-center">
+              <button
+                v-for="bg in BACKGROUNDS"
+                :key="bg.id"
+                @click="settings.background = bg.id"
+                :class="[
+                  'w-12 h-12 rounded-full transition-transform flex-shrink-0',
+                  settings.background === bg.id ? 'ring-3 ring-purple-400 scale-110' : 'hover:scale-105'
+                ]"
+                :style="{ background: `linear-gradient(135deg, ${bg.colors[0]}, ${bg.colors[1]})` }"
+                :title="bg.name"
+              ></button>
+            </div>
+          </div>
+        </section>
+
+      </div>
+
+      <!-- 高级配置 -->
+      <div v-else class="flex-1 overflow-y-auto p-4 pr-4 md:pr-6 space-y-3 bg-gray-50 md:border-l border-gray-200">
         <!-- ASR -->
         <section class="space-y-2">
           <div class="inline-block px-2 py-0.5 rounded text-xs font-semibold bg-blue-100 text-blue-600">
@@ -675,69 +822,6 @@ onUnmounted(() => {
           </div>
         </section>
 
-        <!-- 外观设置 -->
-        <section class="space-y-2">
-          <div class="inline-block px-2 py-0.5 rounded text-xs font-semibold bg-purple-100 text-purple-600">
-            ⑤ 外观设置
-          </div>
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-            <!-- 角色选择 -->
-            <div class="bg-white border rounded-lg p-2">
-              <div class="flex justify-between items-center mb-2">
-                <span class="text-sm text-gray-600">角色形象</span>
-              </div>
-              <div class="grid grid-cols-2 gap-1">
-                <button
-                  v-for="av in AVATARS"
-                  :key="av.id"
-                  @click="settings.avatar = av.id"
-                  :class="[
-                    'p-2 rounded-lg text-xs text-center transition-colors',
-                    settings.avatar === av.id
-                      ? 'bg-purple-100 text-purple-600 ring-2 ring-purple-400'
-                      : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
-                  ]"
-                >
-                  <span class="text-lg">{{ av.icon }}</span>
-                  <div>{{ av.name }}</div>
-                </button>
-              </div>
-            </div>
-            <!-- 背景选择 -->
-            <div class="bg-white border rounded-lg p-2">
-              <div class="flex justify-between items-center mb-2">
-                <span class="text-sm text-gray-600">背景主题</span>
-              </div>
-              <div class="grid grid-cols-5 gap-1">
-                <button
-                  v-for="bg in BACKGROUNDS"
-                  :key="bg.id"
-                  @click="settings.background = bg.id"
-                  :class="[
-                    'w-8 h-8 rounded-full transition-transform',
-                    settings.background === bg.id ? 'ring-2 ring-purple-400 scale-110' : 'hover:scale-105'
-                  ]"
-                  :style="{ background: `linear-gradient(135deg, ${bg.colors[0]}, ${bg.colors[1]})` }"
-                  :title="bg.name"
-                ></button>
-              </div>
-            </div>
-            <!-- 助手名字 -->
-            <div class="bg-white border rounded-lg p-2 sm:col-span-2">
-              <div class="flex justify-between items-center mb-2">
-                <span class="text-sm text-gray-600">助手名字</span>
-                <span class="text-xs text-gray-400">喊名字可打断</span>
-              </div>
-              <input
-                v-model="settings.assistantName"
-                type="text"
-                placeholder="给助手起个名字"
-                maxlength="10"
-                class="w-full px-3 py-1.5 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
-              />
-            </div>
-          </div>
-        </section>
       </div>
     </template>
 
