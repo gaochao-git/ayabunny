@@ -243,7 +243,7 @@ export function useTTSPlayer(options: TTSPlayerOptions = {}) {
    */
   function setGain(newGain: number): void {
     if (gainNode) {
-      gainNode.gain.value = Math.max(1, Math.min(20, newGain))
+      gainNode.gain.value = Math.max(0, Math.min(20, newGain))
     }
   }
 

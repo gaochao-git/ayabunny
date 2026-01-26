@@ -685,7 +685,7 @@ onUnmounted(() => {
                 <span class="text-sm text-gray-600">音量增益</span>
                 <span class="text-sm font-medium">{{ settings.ttsGain }}x</span>
               </div>
-              <input type="range" v-model.number="settings.ttsGain" min="1" max="20" class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-yellow-500" />
+              <input type="range" v-model.number="settings.ttsGain" min="0" max="20" class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-yellow-500" />
             </div>
           </div>
 
