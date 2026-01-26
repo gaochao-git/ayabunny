@@ -621,13 +621,13 @@ function clearChat() {
               :class="[
                 'w-9 h-9 rounded-full flex items-center justify-center transition-colors',
                 canSend
-                  ? 'bg-orange-400 hover:bg-orange-500 text-white'
+                  ? 'bg-blue-500 hover:bg-blue-600 text-white'
                   : 'bg-gray-200 text-gray-400 cursor-not-allowed'
               ]"
               title="发送"
             >
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 10l7-7m0 0l7 7m-7-7v18" />
               </svg>
             </button>
           </div>
