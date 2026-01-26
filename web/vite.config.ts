@@ -13,7 +13,7 @@ export default defineConfig({
   server: {
     port: 6001,
     host: true,  // 监听所有网络接口，允许局域网访问
-    https: true, // 启用 HTTPS（自签名证书），手机端需要麦克风权限
+    // https 由 basicSsl 插件提供
     proxy: {
       '/api': {
         target: 'http://127.0.0.1:6002',

@@ -1,9 +1,12 @@
 """语音助手后端服务入口"""
 
 import uvicorn
+from pathlib import Path
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from config import get_settings
 from api import api_router, ws_router
 from agent.skills_loader import discover_skills
@@ -60,6 +63,22 @@ async def root():
 async def health():
     """健康检查"""
     return {"status": "healthy"}
+
+
+# 静态文件服务（前端构建产物）
+FRONTEND_DIR = Path(__file__).parent.parent / "web" / "dist"
+if FRONTEND_DIR.exists():
+    # 静态资源目录
+    app.mount("/assets", StaticFiles(directory=FRONTEND_DIR / "assets"), name="assets")
+
+    # 前端入口页面（SPA 路由回退）
+    @app.get("/{full_path:path}")
+    async def serve_frontend(full_path: str):
+        """服务前端页面"""
+        file_path = FRONTEND_DIR / full_path
+        if file_path.exists() and file_path.is_file():
+            return FileResponse(file_path)
+        return FileResponse(FRONTEND_DIR / "index.html")
 
 
 if __name__ == "__main__":
