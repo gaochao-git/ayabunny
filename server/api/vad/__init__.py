@@ -19,8 +19,8 @@ router = APIRouter()
 
 settings = get_settings()
 
-# 默认 VAD 后端
-DEFAULT_VAD_BACKEND = "ten"
+# 默认 VAD 后端（webrtc 兼容性最好，不需要额外的系统库）
+DEFAULT_VAD_BACKEND = "webrtc"
 SAMPLE_RATE = 16000
 
 

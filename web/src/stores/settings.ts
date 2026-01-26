@@ -114,9 +114,9 @@ export const useSettingsStore = defineStore('settings', () => {
 
   // ========== VAD 打断检测 ==========
   const vadEnabled = ref(initial.vadEnabled ?? true)                // 启用 VAD
-  // VAD 类型（兼容旧值 'simple' 迁移到 'ten'）
-  const savedVadType = initial.vadType === 'simple' ? 'ten' : initial.vadType
-  const vadType = ref<VADType>(savedVadType ?? 'ten')
+  // VAD 类型（兼容旧值 'simple'/'ten' 迁移到 'webrtc'）
+  const savedVadType = (initial.vadType === 'simple' || initial.vadType === 'ten') ? 'webrtc' : initial.vadType
+  const vadType = ref<VADType>(savedVadType ?? 'webrtc')
   const vadThreshold = ref(initial.vadThreshold ?? 60)              // 打断阈值 (10-80)，仅简单模式
   const vadTriggerCount = ref(initial.vadTriggerCount ?? 5)         // 触发次数 (2-10)，仅简单模式
   const vadIgnoreTime = ref(initial.vadIgnoreTime ?? 800)           // 忽略时间 (ms)
