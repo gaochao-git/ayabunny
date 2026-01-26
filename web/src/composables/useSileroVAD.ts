@@ -11,6 +11,8 @@ import { ref, onUnmounted } from 'vue'
 export interface SileroVADOptions {
   /** Silero VAD WebSocket 地址 */
   wsUrl?: string
+  /** VAD 后端类型（支持动态函数获取） */
+  backend?: string | (() => string)
   /** 语音开始回调（如果配置了中断词，只有匹配时才触发） */
   onSpeechStart?: () => void
   /** 语音结束回调 */
@@ -33,6 +35,7 @@ export function useSileroVAD(options: SileroVADOptions = {}) {
 
   const {
     wsUrl = defaultWsUrl,
+    backend = 'ten',
     onSpeechStart,
     onSpeechEnd,
     onWakeWordDetected,
@@ -40,6 +43,14 @@ export function useSileroVAD(options: SileroVADOptions = {}) {
     wakeWords = [],
     transcribeFn,
   } = options
+
+  // 获取后端类型
+  function getBackend(): string {
+    const b = typeof backend === 'function' ? backend() : backend
+    // 前端 vadType 映射到后端 backend
+    if (b === 'silero') return 'silero_onnx'
+    return b
+  }
 
   const isActive = ref(false)
   const isSpeaking = ref(false)
@@ -225,15 +236,18 @@ export function useSileroVAD(options: SileroVADOptions = {}) {
       ws.onopen = () => {
         console.log('[Silero VAD] WebSocket 已连接')
 
-        // 发送配置
+        // 发送配置（包含后端选择）
+        const backendType = getBackend()
         const config = {
           mode: 'streaming',
+          backend: backendType,
           sample_rate: 16000,
           threshold: 0.5,
           min_speech_ms: 250,
           min_silence_ms: 500,
         }
         ws?.send(JSON.stringify(config))
+        console.log(`[Silero VAD] 使用后端: ${backendType}`)
 
         // 设置忽略时间
         const ignoreMs = getIgnoreTime()

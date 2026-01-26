@@ -35,10 +35,10 @@ export const TTS_VOICES = [
 
 // VAD 类型选项
 export const VAD_TYPES = [
-  { id: 'simple', name: '简单音量检测', desc: '基于音量阈值，低延迟' },
-  { id: 'webrtc', name: 'WebRTC VAD', desc: '频谱分析，轻量准确' },
-  { id: 'silero', name: 'Silero VAD', desc: '后端AI模型，轻量准确' },
-  { id: 'funasr', name: 'FunASR VAD', desc: '后端AI模型，最准确' },
+  { id: 'ten', name: 'TEN VAD', desc: '后端，超轻量(1.3MB)，低延迟' },
+  { id: 'webrtc', name: 'WebRTC VAD', desc: '前端频谱分析，超轻量' },
+  { id: 'silero', name: 'Silero VAD', desc: '后端ONNX模型，准确(50MB)' },
+  { id: 'funasr', name: 'FunASR VAD', desc: '后端AI模型，待实现' },
 ] as const
 
 export type VADType = typeof VAD_TYPES[number]['id']
@@ -90,7 +90,9 @@ export const useSettingsStore = defineStore('settings', () => {
 
   // ========== VAD 打断检测 ==========
   const vadEnabled = ref(initial.vadEnabled ?? true)                // 启用 VAD
-  const vadType = ref<VADType>(initial.vadType ?? 'simple')         // VAD 类型
+  // VAD 类型（兼容旧值 'simple' 迁移到 'ten'）
+const savedVadType = initial.vadType === 'simple' ? 'ten' : initial.vadType
+const vadType = ref<VADType>(savedVadType ?? 'ten')
   const vadThreshold = ref(initial.vadThreshold ?? 60)              // 打断阈值 (10-80)，仅简单模式
   const vadTriggerCount = ref(initial.vadTriggerCount ?? 5)         // 触发次数 (2-10)，仅简单模式
   const vadIgnoreTime = ref(initial.vadIgnoreTime ?? 800)           // 忽略时间 (ms)

@@ -16,4 +16,5 @@ api_router.include_router(tts_router, prefix="/tts", tags=["tts"])
 api_router.include_router(skills_router, prefix="/skills", tags=["skills"])
 
 # WebSocket 路由（单独导出，在 main.py 中注册到根路径）
+# VAD 模块现在是一个包，支持多种后端（ten, webrtc 等）
 ws_router = vad_router

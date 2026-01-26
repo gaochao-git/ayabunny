@@ -20,11 +20,15 @@ python-dotenv>=1.0.0
 pydantic>=2.9.0
 pydantic-settings>=2.5.0
 
-# VAD (Silero VAD 通过 torch.hub 加载)
+# VAD (支持多后端: ten, webrtc, silero_torch, silero_onnx, funasr)
 websockets>=12.0
-torch>=2.0.0
-torchaudio>=2.0.0
 numpy>=1.24.0
+ten-vad>=1.0.0              # TEN VAD - 轻量、低延迟
+webrtcvad-wheels>=2.0.0     # WebRTC VAD - 超轻量、经典
+# torch>=2.0.0              # Silero VAD PyTorch 版（可选，待实现）
+# torchaudio>=2.0.0         # Silero VAD PyTorch 版（可选，待实现）
+onnxruntime>=1.16.0         # Silero VAD ONNX 版
+# funasr                    # FunASR FSMN-VAD（可选，待实现）
 
 # ASR (内置 Whisper)
 faster-whisper>=1.0.0

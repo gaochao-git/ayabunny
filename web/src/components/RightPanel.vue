@@ -40,8 +40,6 @@ const tooltips = {
   ttsGain: '放大语音播放的音量。',
   vadEnabled: '开启后，当AI说话时如果检测到你在说话，会自动停止播放。',
   vadType: '选择语音活动检测方式。',
-  vadThreshold: '打断检测的音量阈值。（仅简单模式）',
-  vadTriggerCount: '连续检测到多少次超过阈值才触发打断。',
   vadIgnoreTime: 'AI开始说话后忽略麦克风输入的时间。',
 }
 
@@ -635,22 +633,9 @@ onUnmounted(() => {
                 <span class="text-sm text-gray-600">检测方式</span>
               </div>
               <select v-model="settings.vadType" class="w-full px-2 py-1.5 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-red-500">
-                <option v-for="vad in VAD_TYPES" :key="vad.id" :value="vad.id">{{ vad.name }}</option>
+                <option v-for="vad in VAD_TYPES" :key="vad.id" :value="vad.id" :title="vad.desc">{{ vad.name }}</option>
               </select>
-            </div>
-            <div v-show="settings.vadType === 'simple'" class="bg-white border rounded-lg p-2 cursor-help" :title="tooltips.vadThreshold">
-              <div class="flex justify-between items-center mb-2">
-                <span class="text-sm text-gray-600">打断阈值</span>
-                <span class="text-sm font-medium">{{ settings.vadThreshold }}</span>
-              </div>
-              <input type="range" v-model.number="settings.vadThreshold" min="10" max="80" class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-red-500" />
-            </div>
-            <div v-show="settings.vadType === 'simple'" class="bg-white border rounded-lg p-2 cursor-help" :title="tooltips.vadTriggerCount">
-              <div class="flex justify-between items-center mb-2">
-                <span class="text-sm text-gray-600">触发次数</span>
-                <span class="text-sm font-medium">{{ settings.vadTriggerCount }}</span>
-              </div>
-              <input type="range" v-model.number="settings.vadTriggerCount" min="2" max="10" class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-red-500" />
+              <p class="text-xs text-gray-400 mt-1">{{ VAD_TYPES.find(v => v.id === settings.vadType)?.desc }}</p>
             </div>
             <div class="bg-white border rounded-lg p-2 cursor-help" :title="tooltips.vadIgnoreTime">
               <div class="flex justify-between items-center mb-2">

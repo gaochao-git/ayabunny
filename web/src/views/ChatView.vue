@@ -3,7 +3,6 @@ import { ref, computed, watch } from 'vue'
 import { useChat } from '@/composables/useChat'
 import { useAudioRecorder } from '@/composables/useAudioRecorder'
 import { useTTSPlayer } from '@/composables/useTTSPlayer'
-import { useVAD } from '@/composables/useVAD'
 import { useWebRTCVAD } from '@/composables/useWebRTCVAD'
 import { useSileroVAD } from '@/composables/useSileroVAD'
 import { useFunASRVAD } from '@/composables/useFunASRVAD'
@@ -109,20 +108,6 @@ function handleVADSpeechStart() {
   }
 }
 
-// 简单 VAD（基于音量阈值）
-const simpleVAD = useVAD({
-  threshold: () => settings.vadThreshold,
-  triggerCount: () => settings.vadTriggerCount,
-  ignoreTime: () => settings.vadIgnoreTime,
-  wakeWords: getWakeWords,
-  wakeWordTimeout: 1500,
-  transcribeFn: transcribeForWakeWord,
-  onWakeWordDetected: () => {
-    console.log('[SimpleVAD] 唤醒词检测到！')
-  },
-  onSpeechStart: handleVADSpeechStart,
-})
-
 // WebRTC VAD（基于频谱分析）
 const webrtcVAD = useWebRTCVAD({
   ignoreTime: () => settings.vadIgnoreTime,
@@ -142,6 +127,7 @@ const getVadWsUrl = () => {
 }
 const sileroVAD = useSileroVAD({
   wsUrl: getVadWsUrl(),  // 通过 Vite 代理或直连后端
+  backend: () => settings.vadType,  // 动态获取 VAD 后端类型
   wakeWords: getWakeWords,  // 中断词列表（动态获取，包含助手名字）
   transcribeFn: transcribeForWakeWord,  // ASR 识别函数
   ignoreTime: () => settings.vadIgnoreTime,
@@ -164,35 +150,35 @@ const funasrVAD = useFunASRVAD({
 })
 
 // 统一 VAD 接口
+// - ten/silero/funasr: 连接后端 /ws/vad WebSocket（后端根据配置选择 VAD 后端）
+// - webrtc: 前端频谱分析
 const vad = {
   start: async () => {
     if (settings.vadType === 'funasr') {
       await funasrVAD.start()
-    } else if (settings.vadType === 'silero') {
+    } else if (settings.vadType === 'silero' || settings.vadType === 'ten') {
+      // ten 和 silero 都连接后端 /ws/vad
       await sileroVAD.start()
     } else if (settings.vadType === 'webrtc') {
       await webrtcVAD.start()
-    } else {
-      simpleVAD.start()
     }
   },
   stop: () => {
-    simpleVAD.stop()
     webrtcVAD.stop()
     sileroVAD.stop()
     funasrVAD.stop()
   },
   get isActive() {
     if (settings.vadType === 'funasr') return funasrVAD.isActive
-    if (settings.vadType === 'silero') return sileroVAD.isActive
+    if (settings.vadType === 'silero' || settings.vadType === 'ten') return sileroVAD.isActive
     if (settings.vadType === 'webrtc') return webrtcVAD.isActive
-    return simpleVAD.isActive
+    return { value: false }
   },
   get isSpeaking() {
     if (settings.vadType === 'funasr') return funasrVAD.isSpeaking
-    if (settings.vadType === 'silero') return sileroVAD.isSpeaking
+    if (settings.vadType === 'silero' || settings.vadType === 'ten') return sileroVAD.isSpeaking
     if (settings.vadType === 'webrtc') return webrtcVAD.isSpeaking
-    return simpleVAD.isSpeaking
+    return { value: false }
   },
   get isLoading() {
     return sileroVAD.isLoading || funasrVAD.isConnecting
@@ -204,7 +190,6 @@ watch(() => settings.vadType, (newType, oldType) => {
   if (newType !== oldType) {
     console.log(`[VAD] 切换类型: ${oldType} -> ${newType}`)
     // 停止所有 VAD
-    simpleVAD.stop()
     webrtcVAD.stop()
     sileroVAD.stop()
     funasrVAD.stop()
@@ -241,7 +226,7 @@ const statusText = computed(() => {
       return '验证中断词...'
     }
     // VAD 检测到语音
-    if (funasrVAD.isSpeaking.value || sileroVAD.isSpeaking.value || webrtcVAD.isSpeaking.value || simpleVAD.isSpeaking.value) {
+    if (funasrVAD.isSpeaking.value || sileroVAD.isSpeaking.value || webrtcVAD.isSpeaking.value) {
       return '检测到语音...'
     }
     return '正在说...'

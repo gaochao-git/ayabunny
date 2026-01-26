@@ -30,6 +30,10 @@ class Settings(BaseSettings):
     TTS_VOICE: str = "alex"
     TTS_API_KEY: str = ""  # 使用 OPENAI_API_KEY 或单独配置
 
+    # VAD 配置
+    # 可选: ten, webrtc, silero_torch, silero_onnx, funasr
+    VAD_BACKEND: str = "ten"
+
     # 数据目录
     DATA_ROOT: str = os.path.join(os.path.dirname(__file__), "skills")
 
