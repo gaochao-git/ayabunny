@@ -65,11 +65,26 @@ async def health():
     return {"status": "healthy"}
 
 
-# 静态文件服务（前端构建产物）- 放在最后，优先级最低
+# 静态文件服务（前端构建产物）
 FRONTEND_DIR = Path(__file__).parent.parent / "web" / "dist"
 if FRONTEND_DIR.exists():
-    # 挂载整个 dist 目录作为静态文件，html=True 启用 SPA 模式
-    app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="frontend")
+    # 静态资源目录（JS/CSS）
+    app.mount("/assets", StaticFiles(directory=FRONTEND_DIR / "assets"), name="assets")
+
+    # 根路径
+    @app.get("/", response_class=FileResponse)
+    async def serve_index():
+        return FileResponse(FRONTEND_DIR / "index.html")
+
+    # 其他前端路由（排除 API/WS/health）
+    @app.get("/{path:path}", response_class=FileResponse)
+    async def serve_frontend(path: str):
+        # 静态文件
+        file_path = FRONTEND_DIR / path
+        if file_path.exists() and file_path.is_file():
+            return FileResponse(file_path)
+        # SPA 回退
+        return FileResponse(FRONTEND_DIR / "index.html")
 
 
 if __name__ == "__main__":
