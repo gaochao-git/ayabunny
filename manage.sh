@@ -11,12 +11,17 @@ if [ -f "$SCRIPT_DIR/server/.env" ]; then
 fi
 SERVER_PORT=${SERVER_PORT:-8888}
 
-# 检查 venv 环境
-check_venv() {
-    if [ ! -d "$VENV_DIR" ]; then
-        echo "✗ 虚拟环境不存在: $VENV_DIR"
+# 激活 Python 环境 (优先 venv，其次 conda)
+activate_env() {
+    if [ -d "$VENV_DIR" ]; then
+        source "$VENV_DIR/bin/activate"
+    elif [ -f "/opt/miniconda3/etc/profile.d/conda.sh" ]; then
+        source /opt/miniconda3/etc/profile.d/conda.sh
+        conda activate voice_chat 2>/dev/null || conda activate base
+    else
+        echo "✗ 未找到 Python 环境"
         echo ""
-        echo "请先创建虚拟环境:"
+        echo "请创建 venv 环境:"
         echo "  cd $SCRIPT_DIR"
         echo "  python3 -m venv venv"
         echo "  source venv/bin/activate"
@@ -26,13 +31,12 @@ check_venv() {
 }
 
 start() {
-    check_venv
+    activate_env
     if lsof -i :$SERVER_PORT > /dev/null 2>&1; then
         echo "服务已在运行 (端口 $SERVER_PORT)"
         return 0
     fi
     echo "启动服务 (端口 $SERVER_PORT)..."
-    source "$VENV_DIR/bin/activate"
     cd "$SCRIPT_DIR/server"
     mkdir -p "$LOG_DIR"
     nohup python -m uvicorn main:app --host 0.0.0.0 --port $SERVER_PORT > "$LOG_DIR/server.log" 2>&1 &
