@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { useSettingsStore, ASR_SERVICES, LLM_MODELS, TTS_VOICES, VAD_TYPES, BACKGROUNDS, AVATARS } from '@/stores/settings'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { useSettingsStore, ASR_SERVICES, LLM_MODELS, TTS_MODELS, TTS_VOICES, DEFAULT_TTS_VOICES, VAD_TYPES, BACKGROUNDS, AVATARS } from '@/stores/settings'
 import { getStories, createStory, updateStory, deleteStory, generateStory, type Story } from '@/api/skills'
 import { getCustomVoices, createCustomVoice, deleteCustomVoice, testCustomVoice, getVoiceAudioUrl, type CustomVoice } from '@/api/tts'
 
@@ -35,6 +35,7 @@ const tooltips = {
   llmTemperature: '控制AI回复的随机性。0=稳定；1.5=创意。',
   llmMaxTokens: '限制AI单次回复的最大长度。',
   llmMaxHistory: '保留多少轮对话历史作为上下文。',
+  ttsModel: '选择语音合成模型。',
   ttsVoice: '选择语音合成的声音角色。',
   ttsSpeed: '调整语音播放速度。0.5=慢速，1.0=正常，2.0=快速。',
   ttsGain: '放大语音播放的音量。',
@@ -55,9 +56,15 @@ let mediaRecorder: MediaRecorder | null = null
 let recordedChunks: Blob[] = []
 let recordingTimer: number | null = null
 
+// 当前模型的预设音色列表
+const currentModelVoices = computed(() => {
+  const modelId = settings.ttsModel as keyof typeof TTS_VOICES
+  return TTS_VOICES[modelId] || DEFAULT_TTS_VOICES
+})
+
 // 合并的音色选项（预设 + 自定义）
 const allVoiceOptions = computed(() => {
-  const preset = TTS_VOICES.map(v => ({
+  const preset = currentModelVoices.value.map(v => ({
     id: v.id,
     name: v.name,
     isCustom: false,
@@ -81,12 +88,24 @@ const selectedVoiceId = computed({
   set: (val: string) => {
     if (val.startsWith('custom:')) {
       settings.ttsCustomVoiceId = val.replace('custom:', '')
-      settings.ttsVoice = 'alex'  // 默认值
+      settings.ttsVoice = currentModelVoices.value[0]?.id || 'alex'
     } else {
       settings.ttsCustomVoiceId = null
       settings.ttsVoice = val
     }
   },
+})
+
+// 监听 TTS 模型变化，自动重置音色为新模型的第一个
+watch(() => settings.ttsModel, (newModel) => {
+  const modelId = newModel as keyof typeof TTS_VOICES
+  const voices = TTS_VOICES[modelId] || DEFAULT_TTS_VOICES
+  // 如果当前音色不在新模型的音色列表中，重置为第一个
+  const currentVoice = settings.ttsVoice
+  const voiceExists = voices.some(v => v.id === currentVoice)
+  if (!voiceExists && !settings.ttsCustomVoiceId) {
+    settings.ttsVoice = voices[0]?.id || 'alex'
+  }
 })
 
 async function loadCustomVoices() {
@@ -485,13 +504,22 @@ onUnmounted(() => {
             ③ TTS 语音合成
           </div>
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <div class="bg-white border rounded-lg p-2 cursor-help" :title="tooltips.ttsModel">
+              <div class="flex justify-between items-center mb-2">
+                <span class="text-sm text-gray-600">模型</span>
+              </div>
+              <select v-model="settings.ttsModel" class="w-full px-2 py-1.5 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-yellow-500">
+                <option v-for="model in TTS_MODELS" :key="model.id" :value="model.id">{{ model.name }}</option>
+              </select>
+              <p class="text-xs text-gray-400 mt-1">{{ TTS_MODELS.find(m => m.id === settings.ttsModel)?.desc }}</p>
+            </div>
             <div class="bg-white border rounded-lg p-2 cursor-help" :title="tooltips.ttsVoice">
               <div class="flex justify-between items-center mb-2">
                 <span class="text-sm text-gray-600">声音</span>
               </div>
               <select v-model="selectedVoiceId" class="w-full px-2 py-1.5 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-yellow-500">
                 <optgroup label="预设音色">
-                  <option v-for="voice in TTS_VOICES" :key="voice.id" :value="voice.id">{{ voice.name }}</option>
+                  <option v-for="voice in currentModelVoices" :key="voice.id" :value="voice.id">{{ voice.name }}</option>
                 </optgroup>
                 <optgroup v-if="customVoices.length > 0" label="自定义音色">
                   <option v-for="voice in customVoices" :key="voice.id" :value="`custom:${voice.id}`">🎤 {{ voice.name }}</option>

@@ -16,8 +16,9 @@ export interface ASRResult {
 
 // ASR 服务端点配置
 const ASR_ENDPOINTS: Record<ASRService, string> = {
-  funasr: '/api/asr/transcribe',
+  sensevoice: '/api/asr/sensevoice/transcribe',
   whisper: '/api/asr/whisper/transcribe',
+  funasr: '/api/asr/funasr/transcribe',
 }
 
 /**

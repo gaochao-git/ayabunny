@@ -41,6 +41,7 @@ const backgroundStyle = computed(() => ({
 // TTS 播放器
 ttsPlayer = useTTSPlayer({
   gain: () => settings.ttsGain,
+  model: () => settings.ttsModel,
   voice: () => settings.ttsVoice,
   customVoiceId: () => settings.ttsCustomVoiceId,
   speed: () => settings.ttsSpeed,

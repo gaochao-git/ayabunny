@@ -7,8 +7,9 @@ import { ref, watch } from 'vue'
 
 // ASR 服务选项
 export const ASR_SERVICES = [
-  { id: 'funasr', name: 'FunASR', desc: '阿里达摩院，中文优化', port: 10095 },
-  { id: 'whisper', name: 'Whisper', desc: 'OpenAI，多语言支持', port: 8017 },
+  { id: 'sensevoice', name: 'SenseVoice', desc: '云端，免费，中文优秀（默认）' },
+  { id: 'whisper', name: 'Whisper', desc: '本地，需配置 WHISPER_ENABLED=true' },
+  { id: 'funasr', name: 'FunASR', desc: '本地，需配置 FUNASR_ENABLED=true' },
 ] as const
 
 export type ASRService = typeof ASR_SERVICES[number]['id']
@@ -21,17 +22,39 @@ export const LLM_MODELS = [
 
 export type LLMModel = typeof LLM_MODELS[number]['id']
 
-// TTS 音色选项
-export const TTS_VOICES = [
-  { id: 'alex', name: 'Alex (男·稳重)' },
-  { id: 'benjamin', name: 'Benjamin (男·低沉)' },
-  { id: 'charles', name: 'Charles (男·磁性)' },
-  { id: 'david', name: 'David (男·开朗)' },
-  { id: 'anna', name: 'Anna (女·稳重)' },
-  { id: 'bella', name: 'Bella (女·热情)' },
-  { id: 'claire', name: 'Claire (女·温柔)' },
-  { id: 'diana', name: 'Diana (女·开朗)' },
-]
+// TTS 模型选项
+export const TTS_MODELS = [
+  { id: 'IndexTeam/IndexTTS-2', name: 'IndexTTS-2', desc: '多音色，支持克隆（默认）' },
+  { id: 'FunAudioLLM/CosyVoice2-0.5B', name: 'CosyVoice 2', desc: '阿里开源，中文效果好' },
+] as const
+
+export type TTSModel = typeof TTS_MODELS[number]['id']
+
+// TTS 音色选项（按模型分组）
+export const TTS_VOICES = {
+  'IndexTeam/IndexTTS-2': [
+    { id: 'alex', name: 'Alex (男·稳重)' },
+    { id: 'benjamin', name: 'Benjamin (男·低沉)' },
+    { id: 'charles', name: 'Charles (男·磁性)' },
+    { id: 'david', name: 'David (男·开朗)' },
+    { id: 'anna', name: 'Anna (女·稳重)' },
+    { id: 'bella', name: 'Bella (女·热情)' },
+    { id: 'claire', name: 'Claire (女·温柔)' },
+    { id: 'diana', name: 'Diana (女·开朗)' },
+  ],
+  'FunAudioLLM/CosyVoice2-0.5B': [
+    { id: '中文女', name: '中文女' },
+    { id: '中文男', name: '中文男' },
+    { id: '英文女', name: '英文女' },
+    { id: '英文男', name: '英文男' },
+    { id: '日语男', name: '日语男' },
+    { id: '粤语女', name: '粤语女' },
+    { id: '韩语女', name: '韩语女' },
+  ],
+} as const
+
+// 默认音色（兼容旧代码）
+export const DEFAULT_TTS_VOICES = TTS_VOICES['IndexTeam/IndexTTS-2']
 
 // VAD 类型选项
 export const VAD_TYPES = [
@@ -70,7 +93,7 @@ export const useSettingsStore = defineStore('settings', () => {
   const initial = stored ? JSON.parse(stored) : {}
 
   // ========== ASR 语音识别 ==========
-  const asrService = ref<ASRService>(initial.asrService ?? 'funasr') // ASR 服务
+  const asrService = ref<ASRService>(initial.asrService ?? 'sensevoice') // ASR 服务
   const silenceThreshold = ref(initial.silenceThreshold ?? 30)      // 静音阈值 (0-255)
   const silenceDuration = ref(initial.silenceDuration ?? 1500)      // 静音时长 (ms)
   const autoSend = ref(initial.autoSend ?? true)                    // 静音自动发送
@@ -83,6 +106,7 @@ export const useSettingsStore = defineStore('settings', () => {
 
   // ========== TTS 语音合成 ==========
   const ttsEnabled = ref(initial.ttsEnabled ?? true)                // 启用 TTS
+  const ttsModel = ref<TTSModel>(initial.ttsModel ?? 'IndexTeam/IndexTTS-2')  // TTS 模型
   const ttsVoice = ref(initial.ttsVoice ?? 'alex')                  // 声音选择
   const ttsCustomVoiceId = ref<string | null>(initial.ttsCustomVoiceId ?? null)  // 自定义音色 ID
   const ttsSpeed = ref(initial.ttsSpeed ?? 1.0)                     // 语速 (0.5-2.0)
@@ -91,8 +115,8 @@ export const useSettingsStore = defineStore('settings', () => {
   // ========== VAD 打断检测 ==========
   const vadEnabled = ref(initial.vadEnabled ?? true)                // 启用 VAD
   // VAD 类型（兼容旧值 'simple' 迁移到 'ten'）
-const savedVadType = initial.vadType === 'simple' ? 'ten' : initial.vadType
-const vadType = ref<VADType>(savedVadType ?? 'ten')
+  const savedVadType = initial.vadType === 'simple' ? 'ten' : initial.vadType
+  const vadType = ref<VADType>(savedVadType ?? 'ten')
   const vadThreshold = ref(initial.vadThreshold ?? 60)              // 打断阈值 (10-80)，仅简单模式
   const vadTriggerCount = ref(initial.vadTriggerCount ?? 5)         // 触发次数 (2-10)，仅简单模式
   const vadIgnoreTime = ref(initial.vadIgnoreTime ?? 800)           // 忽略时间 (ms)
@@ -117,6 +141,7 @@ const vadType = ref<VADType>(savedVadType ?? 'ten')
       llmMaxHistory: llmMaxHistory.value,
       // TTS
       ttsEnabled: ttsEnabled.value,
+      ttsModel: ttsModel.value,
       ttsVoice: ttsVoice.value,
       ttsCustomVoiceId: ttsCustomVoiceId.value,
       ttsSpeed: ttsSpeed.value,
@@ -140,7 +165,7 @@ const vadType = ref<VADType>(savedVadType ?? 'ten')
     [
       asrService, silenceThreshold, silenceDuration, autoSend,
       llmModel, llmTemperature, llmMaxTokens, llmMaxHistory,
-      ttsEnabled, ttsVoice, ttsCustomVoiceId, ttsSpeed, ttsGain,
+      ttsEnabled, ttsModel, ttsVoice, ttsCustomVoiceId, ttsSpeed, ttsGain,
       vadEnabled, vadType, vadThreshold, vadTriggerCount, vadIgnoreTime,
       background, avatar, assistantName,
     ],
@@ -161,6 +186,7 @@ const vadType = ref<VADType>(savedVadType ?? 'ten')
     llmMaxHistory,
     // TTS
     ttsEnabled,
+    ttsModel,
     ttsVoice,
     ttsCustomVoiceId,
     ttsSpeed,

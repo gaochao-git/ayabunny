@@ -10,6 +10,7 @@ import { synthesize } from '@/api/tts'
 
 export interface TTSPlayerOptions {
   gain?: number | (() => number)      // 音量增益 (1-20x)
+  model?: string | (() => string)     // TTS 模型
   voice?: string | (() => string)     // TTS 声音
   customVoiceId?: string | null | (() => string | null)  // 自定义音色 ID（优先级高于 voice）
   speed?: number | (() => number)     // 语速 (0.5-2.0)
@@ -36,6 +37,7 @@ export function useTTSPlayer(options: TTSPlayerOptions = {}) {
 
   // 动态获取配置值
   const getGain = () => getOptionValue(options.gain, 10)
+  const getModel = () => getOptionValue(options.model, 'IndexTeam/IndexTTS-2')
   const getVoice = () => getOptionValue(options.voice, 'alex')
   const getCustomVoiceId = () => getOptionValue(options.customVoiceId, null)
   const getSpeed = () => getOptionValue(options.speed, 1.0)
@@ -86,11 +88,12 @@ export function useTTSPlayer(options: TTSPlayerOptions = {}) {
    * 开始合成（立即返回 Promise，不阻塞）
    */
   function startSynthesis(text: string): Promise<ArrayBuffer> {
+    const model = getModel()
     const voice = getVoice()
     const customVoiceId = getCustomVoiceId()
     const speed = getSpeed()
-    console.log(`[TTS] 开始预合成: "${text.slice(0, 20)}..." voice=${voice}, speed=${speed}`)
-    return synthesize({ text, voice, customVoiceId: customVoiceId || undefined, speed })
+    console.log(`[TTS] 开始预合成: "${text.slice(0, 20)}..." model=${model}, voice=${voice}, speed=${speed}`)
+    return synthesize({ text, model, voice, customVoiceId: customVoiceId || undefined, speed })
   }
 
   /**

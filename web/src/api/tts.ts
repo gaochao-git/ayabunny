@@ -4,7 +4,8 @@
 
 export interface TTSOptions {
   text: string
-  voice?: string  // IndexTTS-2 音色: alex, benjamin, charles, david, anna, bella, claire, diana
+  model?: string  // TTS 模型: IndexTeam/IndexTTS-2 或 FunAudioLLM/CosyVoice2-0.5B
+  voice?: string  // 预设音色: alex, benjamin, charles, david, anna, bella, claire, diana
   customVoiceId?: string  // 自定义音色 ID（优先级高于 voice）
   speed?: number  // 语速 (0.5-2.0)，默认 1.0
 }
@@ -29,6 +30,7 @@ export async function synthesize(options: TTSOptions): Promise<ArrayBuffer> {
     },
     body: JSON.stringify({
       text: options.text,
+      model: options.model,
       voice: options.voice || 'alex',
       custom_voice_id: options.customVoiceId,
       speed: options.speed ?? 1.0,
