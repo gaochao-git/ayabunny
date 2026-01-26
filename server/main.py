@@ -49,9 +49,9 @@ app.include_router(api_router)
 app.include_router(ws_router, prefix="/ws", tags=["websocket"])
 
 
-@app.get("/")
-async def root():
-    """根路径"""
+@app.get("/api/info")
+async def api_info():
+    """API 信息"""
     return {
         "service": "voice-chat-assistant",
         "version": "1.0.0",
@@ -65,20 +65,11 @@ async def health():
     return {"status": "healthy"}
 
 
-# 静态文件服务（前端构建产物）
+# 静态文件服务（前端构建产物）- 放在最后，优先级最低
 FRONTEND_DIR = Path(__file__).parent.parent / "web" / "dist"
 if FRONTEND_DIR.exists():
-    # 静态资源目录
-    app.mount("/assets", StaticFiles(directory=FRONTEND_DIR / "assets"), name="assets")
-
-    # 前端入口页面（SPA 路由回退）
-    @app.get("/{full_path:path}")
-    async def serve_frontend(full_path: str):
-        """服务前端页面"""
-        file_path = FRONTEND_DIR / full_path
-        if file_path.exists() and file_path.is_file():
-            return FileResponse(file_path)
-        return FileResponse(FRONTEND_DIR / "index.html")
+    # 挂载整个 dist 目录作为静态文件，html=True 启用 SPA 模式
+    app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="frontend")
 
 
 if __name__ == "__main__":
