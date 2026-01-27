@@ -370,11 +370,9 @@ function endCall() {
   ttsPlayer.stop()  // 会清空 TTS 队列
   vad.stop()
 
-  // 停止背景音乐
-  if (isStoryMode.value) {
-    isStoryMode.value = false
-    bgm.stop()
-  }
+  // 停止背景音乐（无论是否在故事模式）
+  isStoryMode.value = false
+  bgm.stop()
 }
 
 // 开始通话录音
