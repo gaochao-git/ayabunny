@@ -1086,8 +1086,9 @@ onUnmounted(() => {
                     class="flex-1 px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
                     :disabled="isGenerating"
                   />
+                  <!-- 故事才有自动获取按钮 -->
                   <button
-                    v-if="!editingStory"
+                    v-if="!editingStory && currentSkillId === 'storytelling'"
                     @click="handleGenerate"
                     :disabled="isGenerating || !form.title.trim()"
                     class="px-4 py-2 bg-green-500 hover:bg-green-600 disabled:bg-gray-300 text-white rounded-lg transition-colors whitespace-nowrap flex items-center gap-2"
@@ -1099,18 +1100,19 @@ onUnmounted(() => {
                     <span>{{ isGenerating ? '生成中...' : '自动获取' }}</span>
                   </button>
                 </div>
-                <p v-if="!editingStory" class="text-xs text-gray-400 mt-1">输入名称后点击"自动获取"，AI 会自动生成内容</p>
+                <p v-if="!editingStory && currentSkillId === 'storytelling'" class="text-xs text-gray-400 mt-1">输入名称后点击"自动获取"，AI 会自动生成内容</p>
               </div>
 
               <div>
                 <label class="block text-sm font-medium text-gray-700 mb-1">内容</label>
                 <textarea
                   v-model="form.content"
-                  :placeholder="currentSkillId === 'poetry' ? '诗词内容（支持 Markdown 格式）' : '故事内容（支持 Markdown 格式）'"
-                  rows="12"
+                  :placeholder="currentSkillId === 'poetry' ? '作者\n\n诗句第一行\n\n诗句第二行\n\n---\n\n**讲给宝宝听**\n\n简单的解释' : '故事内容（支持 Markdown 格式）'"
+                  :rows="currentSkillId === 'poetry' ? 10 : 12"
                   class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500 resize-none font-mono text-sm"
                   :disabled="isGenerating"
                 ></textarea>
+                <p v-if="currentSkillId === 'poetry'" class="text-xs text-gray-400 mt-1">格式：作者 → 诗句 → 分隔线(---) → 讲给宝宝听</p>
               </div>
 
               <!-- 背景音乐选择 -->
