@@ -104,10 +104,6 @@ bgm: null
     for line in lines:
         md += f"{line}\n\n"
 
-    md += "---\n\n**拼音**\n\n"
-    for line in lines:
-        md += f"{add_pinyin_line(line)}\n\n"
-
     md += f"---\n\n**讲给宝宝听**\n\n{explanation}\n"
 
     filepath = os.path.join(output_dir, f"{title}.md")
