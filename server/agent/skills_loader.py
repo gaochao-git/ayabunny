@@ -29,6 +29,7 @@ class SkillMetadata:
     triggers: list[str]  # 触发条件摘要
     tools: list[str]     # 可用工具名
     path: str            # SKILL.md 文件路径
+    content_dir: str = "stories"  # 内容目录名称，默认 stories
 
 
 @dataclass
@@ -98,6 +99,10 @@ def parse_skill_metadata(skill_path: str) -> Optional[SkillMetadata]:
         # 解析工具列表（从 ### 工具名 提取）
         tools = re.findall(r"^###\s+(\w+)\s*$", content, re.MULTILINE)
 
+        # 解析内容目录名称
+        content_dir_match = re.search(r"\*\*内容目录\*\*:\s*(\S+)", content)
+        content_dir = content_dir_match.group(1) if content_dir_match else "stories"
+
         return SkillMetadata(
             id=skill_id,
             name=name,
@@ -107,6 +112,7 @@ def parse_skill_metadata(skill_path: str) -> Optional[SkillMetadata]:
             triggers=triggers,
             tools=tools,
             path=skill_path,
+            content_dir=content_dir,
         )
 
     except Exception as e:

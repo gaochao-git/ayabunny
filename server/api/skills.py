@@ -18,6 +18,7 @@ from agent.skills_loader import (
     get_skill_registry,
     load_skill_content,
     discover_skills,
+    get_skill_by_id,
     SkillMetadata,
 )
 
@@ -105,8 +106,10 @@ def get_skill_path(skill_id: str) -> str:
 
 
 def get_stories_path(skill_id: str) -> str:
-    """获取故事目录路径"""
-    return os.path.join(get_skill_path(skill_id), "stories")
+    """获取内容目录路径（根据技能配置）"""
+    skill = get_skill_by_id(skill_id)
+    content_dir = skill.content_dir if skill else "stories"
+    return os.path.join(get_skill_path(skill_id), content_dir)
 
 
 @router.get("")

@@ -14,7 +14,7 @@ def get_poems_dir() -> str:
         os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
         "skills",
         "poetry",
-        "stories"
+        "poems"
     )
 
 

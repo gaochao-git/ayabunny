@@ -140,7 +140,7 @@ def main():
     # 输出目录
     output_dir = os.path.join(
         os.path.dirname(os.path.dirname(__file__)),
-        "server", "skills", "poetry", "stories"
+        "server", "skills", "poetry", "poems"
     )
     os.makedirs(output_dir, exist_ok=True)
 
