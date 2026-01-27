@@ -2,7 +2,7 @@
 import { ref, onMounted, onUnmounted, watch } from 'vue'
 import * as THREE from 'three'
 
-type MascotType = 'rabbit' | 'bear' | 'cat'
+type MascotType = 'rabbit' | 'bear' | 'cat' | 'dino' | 'panda'
 
 const props = defineProps<{
   type?: MascotType
@@ -90,29 +90,36 @@ function setupMascot(type: MascotType) {
   while (earsGroup.children.length > 0) earsGroup.remove(earsGroup.children[0])
   while (mouthGroup.children.length > 0) mouthGroup.remove(mouthGroup.children[0])
 
-  const materials = {
-    rabbit: getMaterial(0xfffafb),
-    rabbitInner: getMaterial(0xffd1dc),
-    bear: getMaterial(0x8B4513),
-    cat: getMaterial(0xf3f4f6),
+  const materials: Record<string, THREE.Material> = {
+    rabbit: getMaterial(0xe0e2e8),      // 柔和浅灰色
+    rabbitInner: getMaterial(0xffc0cb), // 粉色内耳
+    bear: getMaterial(0xc9956c),        // 温暖浅棕色
+    cat: getMaterial(0xfff5e6),         // 奶油色
+    catInner: getMaterial(0xffcad4),    // 猫内耳粉色
+    dino: getMaterial(0x98d8aa),        // 薄荷绿
+    dinoScales: getMaterial(0xf9d56e),  // 阳光黄
+    panda: getMaterial(0xffffff),       // 白色
+    pandaBlack: getMaterial(0x2d2d2d),  // 黑色
     eye: new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.1 }),
     eyeHighlight: new THREE.MeshBasicMaterial({ color: 0xffffff }),
-    blush: new THREE.MeshBasicMaterial({ color: 0xffb6c1, transparent: true, opacity: 0.4 }),
-    snout: getMaterial(0xffffff),
-    nose: new THREE.MeshStandardMaterial({ color: 0x5D2E0C }),
-    mouthLine: new THREE.MeshStandardMaterial({ color: 0x5D2E0C })
+    blush: new THREE.MeshBasicMaterial({ color: 0xffb6c1, transparent: true, opacity: 0.5 }),
+    snout: getMaterial(0xfff0e6),       // 米白色
+    nose: new THREE.MeshStandardMaterial({ color: 0x4a3728 }),
+    mouthLine: new THREE.MeshStandardMaterial({ color: 0x4a4a4a })
   }
 
   // Body
   const bodyGeom = new THREE.SphereGeometry(0.9, 32, 32)
-  const body = new THREE.Mesh(bodyGeom, materials[type])
+  const bodyMaterial = type === 'panda' ? materials.panda : materials[type]
+  const body = new THREE.Mesh(bodyGeom, bodyMaterial)
   body.scale.set(1, 0.9, 0.8)
   body.position.y = -1.2
   bodyGroup.add(body)
 
   // Head
   const headGeom = new THREE.SphereGeometry(1.2, 64, 64)
-  const head = new THREE.Mesh(headGeom, materials[type])
+  const headMaterial = type === 'panda' ? materials.panda : materials[type]
+  const head = new THREE.Mesh(headGeom, headMaterial)
   head.scale.set(1.08, 1, 1.02)
   headGroup.add(head)
 
@@ -183,31 +190,98 @@ function setupMascot(type: MascotType) {
     mouthPart.rotation.x = Math.PI
     mouthGroup.add(mouthPart)
 
-  } else { // cat
+  } else if (type === 'cat') {
     // Cat ears
-    const earGeom = new THREE.ConeGeometry(0.4, 0.8, 32)
-    const lEar = new THREE.Mesh(earGeom, materials.cat)
-    lEar.position.set(-0.75, 1.05, 0)
-    lEar.rotation.z = 0.35
-    const rEar = new THREE.Mesh(earGeom, materials.cat)
-    rEar.position.set(0.75, 1.05, 0)
-    rEar.rotation.z = -0.35
-    earsGroup.add(lEar, rEar)
+    const createCatEar = (x: number, rotZ: number) => {
+      const earGroup = new THREE.Group()
+      const outerEar = new THREE.Mesh(new THREE.CapsuleGeometry(0.24, 0.5, 8, 20), materials.cat)
+      outerEar.scale.set(1.4, 1.2, 0.8)
+      const innerEar = new THREE.Mesh(new THREE.CapsuleGeometry(0.12, 0.4, 8, 20), materials.catInner)
+      innerEar.position.set(0, -0.05, 0.1)
+      innerEar.scale.set(1.2, 1, 1)
+      earGroup.add(outerEar, innerEar)
+      earGroup.position.set(x, 1.0, 0)
+      earGroup.rotation.z = rotZ
+      earGroup.rotation.x = -0.1
+      return earGroup
+    }
+    earsGroup.add(createCatEar(-0.65, 0.4), createCatEar(0.65, -0.4))
+
+    // Cat muzzle
+    const muzzleGeom = new THREE.SphereGeometry(0.22, 32, 32)
+    const lMuzzle = new THREE.Mesh(muzzleGeom, materials.snout)
+    lMuzzle.scale.set(1, 0.8, 0.6)
+    lMuzzle.position.set(-0.16, -0.3, 1.12)
+    const rMuzzle = new THREE.Mesh(muzzleGeom, materials.snout)
+    rMuzzle.scale.set(1, 0.8, 0.6)
+    rMuzzle.position.set(0.16, -0.3, 1.12)
+    headGroup.add(lMuzzle, rMuzzle)
 
     // Cat nose
-    const nose = new THREE.Mesh(new THREE.ConeGeometry(0.07, 0.07, 3), new THREE.MeshBasicMaterial({ color: 0xffb6c1 }))
-    nose.rotation.x = -Math.PI / 2
-    nose.position.set(0, -0.22, 1.25)
+    const nose = new THREE.Mesh(new THREE.SphereGeometry(0.06, 16, 16), new THREE.MeshBasicMaterial({ color: 0xffb6c1 }))
+    nose.scale.set(1.2, 0.8, 1)
+    nose.position.set(0, -0.2, 1.25)
     headGroup.add(nose)
 
     // Cat mouth
     const mouthL = new THREE.Mesh(new THREE.TorusGeometry(0.08, 0.015, 8, 20, Math.PI), materials.mouthLine)
-    mouthL.position.set(-0.08, -0.38, 1.25)
+    mouthL.position.set(-0.08, -0.35, 1.25)
     mouthL.rotation.x = Math.PI
     const mouthR = new THREE.Mesh(new THREE.TorusGeometry(0.08, 0.015, 8, 20, Math.PI), materials.mouthLine)
-    mouthR.position.set(0.08, -0.38, 1.25)
+    mouthR.position.set(0.08, -0.35, 1.25)
     mouthR.rotation.x = Math.PI
     mouthGroup.add(mouthL, mouthR)
+
+  } else if (type === 'dino') {
+    // Dino snout
+    const snout = new THREE.Mesh(new THREE.SphereGeometry(0.5, 32, 32), materials.dino)
+    snout.scale.set(1.2, 0.8, 1)
+    snout.position.set(0, -0.3, 1.05)
+    headGroup.add(snout)
+
+    // Dino scales (spikes on head)
+    for (let i = 0; i < 3; i++) {
+      const scale = new THREE.Mesh(new THREE.CapsuleGeometry(0.15, 0.2, 8, 10), materials.dinoScales)
+      scale.position.set(0, 1.1 + (i * 0.3), -0.5 + (i * 0.4))
+      scale.rotation.x = -0.5
+      earsGroup.add(scale)
+    }
+
+    // Dino mouth
+    const mouthPart = new THREE.Mesh(new THREE.TorusGeometry(0.12, 0.02, 16, 32, Math.PI), materials.mouthLine)
+    mouthPart.position.set(0, -0.45, 1.35)
+    mouthPart.rotation.x = Math.PI
+    mouthGroup.add(mouthPart)
+
+  } else if (type === 'panda') {
+    // Panda black eye patches
+    const patchGeom = new THREE.SphereGeometry(0.28, 32, 32)
+    const lPatch = new THREE.Mesh(patchGeom, materials.pandaBlack)
+    lPatch.scale.set(1, 1.2, 0.4)
+    lPatch.position.set(-0.48, 0.1, 1)
+    const rPatch = new THREE.Mesh(patchGeom, materials.pandaBlack)
+    rPatch.scale.set(1, 1.2, 0.4)
+    rPatch.position.set(0.48, 0.1, 1)
+    headGroup.add(lPatch, rPatch)
+
+    // Panda ears (black)
+    const earGeom = new THREE.SphereGeometry(0.38, 32, 32)
+    const lEar = new THREE.Mesh(earGeom, materials.pandaBlack)
+    lEar.position.set(-0.85, 0.95, 0)
+    const rEar = new THREE.Mesh(earGeom, materials.pandaBlack)
+    rEar.position.set(0.85, 0.95, 0)
+    earsGroup.add(lEar, rEar)
+
+    // Panda nose (black)
+    const nose = new THREE.Mesh(new THREE.SphereGeometry(0.08, 32, 32), materials.pandaBlack)
+    nose.position.set(0, -0.15, 1.3)
+    headGroup.add(nose)
+
+    // Panda mouth
+    const mouthPart = new THREE.Mesh(new THREE.TorusGeometry(0.1, 0.015, 16, 32, Math.PI), materials.mouthLine)
+    mouthPart.position.set(0, -0.35, 1.3)
+    mouthPart.rotation.x = Math.PI
+    mouthGroup.add(mouthPart)
   }
 
   headGroup.add(earsGroup, mouthGroup)

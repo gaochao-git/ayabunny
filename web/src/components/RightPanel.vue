@@ -720,7 +720,7 @@ onUnmounted(() => {
     class="absolute inset-0 md:relative md:inset-auto w-full md:w-[480px] h-full flex-shrink-0 flex flex-col overflow-hidden bg-white z-20"
   >
     <!-- 头部标题 -->
-    <div class="flex-shrink-0 bg-gradient-to-r from-pink-400 via-pink-500 to-orange-400 px-4 h-14 flex items-center justify-between safe-top">
+    <div class="flex-shrink-0 bg-gradient-to-r from-pink-300 via-rose-300 to-orange-300 px-4 h-14 flex items-center justify-between safe-top">
       <div class="flex items-center gap-2">
         <!-- 手机端返回按钮 -->
         <button
@@ -731,7 +731,7 @@ onUnmounted(() => {
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
           </svg>
         </button>
-        <h2 class="text-white text-lg font-semibold">家长控制台</h2>
+        <h2 class="text-white text-lg font-semibold">AI 实验室</h2>
       </div>
       <!-- PC端关闭按钮 -->
       <button

@@ -56,7 +56,7 @@ const tooltips = {
     class="w-[480px] h-full flex-shrink-0 flex flex-col overflow-hidden"
   >
       <!-- 头部 -->
-      <div class="flex items-center justify-between px-4 py-4 bg-gradient-to-r from-pink-400 via-pink-500 to-orange-400">
+      <div class="flex items-center justify-between px-4 py-4 bg-gradient-to-r from-pink-300 via-rose-300 to-orange-300">
         <h2 class="text-base font-semibold text-white">参数设置</h2>
         <button
           @click="emit('close')"
@@ -69,7 +69,7 @@ const tooltips = {
       </div>
 
       <!-- 当前音量显示 -->
-      <div class="bg-gradient-to-r from-pink-400 to-orange-400 px-4 py-2 text-center" title="当前麦克风检测到的音量值（0-255），用于参考设置静音阈值和打断阈值">
+      <div class="bg-gradient-to-r from-pink-300 to-orange-300 px-4 py-2 text-center" title="当前麦克风检测到的音量值（0-255），用于参考设置静音阈值和打断阈值">
         <span class="text-white/80 text-xs">当前音量: </span>
         <span class="text-white text-xl font-bold">{{ props.audioLevel ?? 0 }}</span>
       </div>

@@ -71,6 +71,8 @@ const mascotType = computed(() => {
   const avatarId = settings.avatar as string
   if (avatarId === 'cat') return 'cat'
   if (avatarId === 'bear') return 'bear'
+  if (avatarId === 'dino') return 'dino'
+  if (avatarId === 'panda') return 'panda'
   return 'rabbit' // 默认兔子
 })
 
@@ -568,7 +570,7 @@ function clearChat() {
         :class="{ 'hidden md:flex': showSettings }"
       >
         <!-- 头部 -->
-        <header class="flex-shrink-0 bg-gradient-to-r from-pink-400 via-pink-500 to-orange-400 px-4 h-14 flex items-center justify-between safe-top">
+        <header class="flex-shrink-0 bg-gradient-to-r from-pink-300 via-rose-300 to-orange-300 px-4 h-14 flex items-center justify-between safe-top">
           <div class="flex items-center gap-2">
             <span class="text-white text-lg font-semibold">{{ settings.assistantName || '小智' }}</span>
           </div>

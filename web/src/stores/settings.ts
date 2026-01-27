@@ -82,6 +82,8 @@ export const AVATARS = [
   { id: 'rabbit', name: '小兔兔', icon: '🐰', file: '/rabbit.svg' },
   { id: 'cat', name: '小猫咪', icon: '🐱', file: '/rabbit.svg' },
   { id: 'bear', name: '小熊熊', icon: '🐻', file: '/rabbit.svg' },
+  { id: 'dino', name: '小恐龙', icon: '🦖', file: '/rabbit.svg' },
+  { id: 'panda', name: '小熊猫', icon: '🐼', file: '/rabbit.svg' },
 ] as const
 
 export type AvatarType = typeof AVATARS[number]['id']
