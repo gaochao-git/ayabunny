@@ -297,6 +297,18 @@ function onMouseMove(e: MouseEvent) {
   mainLight.position.y = 4 + y * 2
 }
 
+// 触摸支持（手机端）
+function onTouchMove(e: TouchEvent) {
+  if (!mainLight || !e.touches.length) return
+  const touch = e.touches[0]
+  const x = (touch.clientX / window.innerWidth) * 2 - 1
+  const y = -(touch.clientY / window.innerHeight) * 2 + 1
+  targetRotation.y = x * 0.45
+  targetRotation.x = -y * 0.25
+  mainLight.position.x = 3 + x * 2
+  mainLight.position.y = 4 + y * 2
+}
+
 function animate() {
   frameId = requestAnimationFrame(animate)
 
@@ -346,6 +358,7 @@ function cleanup() {
     frameId = null
   }
   window.removeEventListener('mousemove', onMouseMove)
+  window.removeEventListener('touchmove', onTouchMove)
   if (renderer && containerRef.value) {
     containerRef.value.removeChild(renderer.domElement)
     renderer.dispose()
@@ -364,6 +377,7 @@ function cleanup() {
 onMounted(() => {
   createScene()
   window.addEventListener('mousemove', onMouseMove)
+  window.addEventListener('touchmove', onTouchMove, { passive: true })
   animate()
 })
 
