@@ -74,55 +74,6 @@ const backgroundStyle = computed(() => ({
   background: `linear-gradient(135deg, ${currentBackground.value.colors[0]} 0%, ${currentBackground.value.colors[1]} 50%, ${currentBackground.value.colors[2]} 100%)`
 }))
 
-// TTS 播放器
-ttsPlayer = useTTSPlayer({
-  gain: () => settings.ttsGain,
-  model: () => settings.ttsModel,
-  voice: () => settings.ttsVoice,
-  customVoiceId: () => settings.ttsCustomVoiceId,
-  speed: () => settings.ttsSpeed,
-  onPlayStart: async () => {
-    console.log('[TTS] 开始播放')
-    // 通话中，播放时启动 VAD 检测打断
-    if (settings.vadEnabled && isInCall.value) {
-      try {
-        await vad.start()
-      } catch (error) {
-        console.error('[VAD] 启动失败:', error)
-      }
-    }
-  },
-  onPlayEnd: () => {
-    console.log('[TTS] 播放结束')
-    // 播放结束后停止 VAD
-    vad.stop()
-    // 通话中自动继续录音（检查状态避免并发）
-    if (isInCall.value && !callRecorder.isRecording.value && !isProcessingCall.value) {
-      startCallRecording()
-    }
-    // 故事模式：TTS 队列播完后立即停止背景音乐
-    // 使用 setTimeout 延迟访问 ttsPlayer，避免前向引用问题
-    setTimeout(() => {
-      if (isStoryMode.value && !ttsPlayer.isPending.value) {
-        console.log('[BGM] 故事播放完毕，停止背景音乐')
-        isStoryMode.value = false
-        bgm.stop()  // 立即渐出停止
-      }
-    }, 0)
-  },
-})
-
-// 监听 TTS 播放状态，实现音频闪避（TTS 播放时降低 BGM 音量）
-watch(() => ttsPlayer.isPlaying.value, (playing) => {
-  if (isStoryMode.value && bgm.isPlaying.value) {
-    if (playing) {
-      bgm.duck()  // TTS 开始播放，降低 BGM 音量
-    } else {
-      bgm.unduck()  // TTS 停止播放，恢复 BGM 音量
-    }
-  }
-})
-
 // 唤醒词 ASR 识别函数
 async function transcribeForWakeWord(blob: Blob): Promise<string> {
   try {
@@ -268,6 +219,52 @@ const callRecorder = useAudioRecorder({
 
 // 语音转文字录音器（不自动停止，手动控制）
 const transcribeRecorder = useAudioRecorder({})
+
+// TTS 播放器（必须在 vad 和 callRecorder 之后初始化，因为回调中会使用它们）
+ttsPlayer = useTTSPlayer({
+  gain: () => settings.ttsGain,
+  model: () => settings.ttsModel,
+  voice: () => settings.ttsVoice,
+  customVoiceId: () => settings.ttsCustomVoiceId,
+  speed: () => settings.ttsSpeed,
+  onPlayStart: async () => {
+    console.log('[TTS] 开始播放')
+    // 通话中，播放时启动 VAD 检测打断
+    if (settings.vadEnabled && isInCall.value) {
+      try {
+        await vad.start()
+      } catch (error) {
+        console.error('[VAD] 启动失败:', error)
+      }
+    }
+  },
+  onPlayEnd: () => {
+    console.log('[TTS] 播放结束')
+    // 播放结束后停止 VAD
+    vad.stop()
+    // 通话中自动继续录音（检查状态避免并发）
+    if (isInCall.value && !callRecorder.isRecording.value && !isProcessingCall.value) {
+      startCallRecording()
+    }
+    // 故事模式：TTS 队列播完后立即停止背景音乐
+    if (isStoryMode.value && !ttsPlayer.isPending.value) {
+      console.log('[BGM] 故事播放完毕，停止背景音乐')
+      isStoryMode.value = false
+      bgm.stop()  // 立即渐出停止
+    }
+  },
+})
+
+// 监听 TTS 播放状态，实现音频闪避（TTS 播放时降低 BGM 音量）
+watch(() => ttsPlayer.isPlaying.value, (playing) => {
+  if (isStoryMode.value && bgm.isPlaying.value) {
+    if (playing) {
+      bgm.duck()  // TTS 开始播放，降低 BGM 音量
+    } else {
+      bgm.unduck()  // TTS 停止播放，恢复 BGM 音量
+    }
+  }
+})
 
 // 计算属性
 const canSend = computed(() => inputText.value.trim() && !chat.isLoading.value)
