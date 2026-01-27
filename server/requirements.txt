@@ -14,6 +14,7 @@ langgraph>=0.2.0
 httpx>=0.27.0
 aiohttp>=3.9.0
 aiofiles>=24.1.0
+beautifulsoup4>=4.12.0      # 网页解析（故事爬取）
 
 # Utils
 python-dotenv>=1.0.0
