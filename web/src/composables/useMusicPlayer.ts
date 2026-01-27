@@ -3,7 +3,7 @@
  * 用于播放儿歌，支持语音控制
  */
 
-import { ref, computed } from 'vue'
+import { ref } from 'vue'
 import { getSongs, getSongAudioUrl, type Song } from '@/api/songs'
 
 export interface MusicPlayerOptions {
@@ -17,6 +17,7 @@ const currentSong = ref<Song | null>(null)
 const isPlaying = ref(false)
 const isPaused = ref(false)
 const isDucked = ref(false)  // 语音检测时降低音量
+const isUnlocked = ref(false)  // 是否已解锁自动播放
 
 let audio: HTMLAudioElement | null = null
 let normalVolume = 0.8
@@ -69,13 +70,35 @@ function getRandomSong(): Song | null {
 export function useMusicPlayer(options: MusicPlayerOptions = {}) {
 
   /**
+   * 解锁音频播放（需要在用户交互时调用）
+   */
+  function unlock(): void {
+    if (isUnlocked.value) return
+
+    // 创建一个静音的音频来解锁
+    const silentAudio = new Audio()
+    silentAudio.volume = 0
+    silentAudio.src = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA'
+
+    silentAudio.play().then(() => {
+      isUnlocked.value = true
+      console.log('[Music] 音频播放已解锁')
+      silentAudio.pause()
+    }).catch(e => {
+      console.log('[Music] 解锁失败（可能需要更多用户交互）:', e.message)
+    })
+  }
+
+  /**
    * 播放指定歌曲
    */
   function play(song: Song): void {
     console.log('[Music] 播放:', song.title)
 
-    // 停止当前播放
+    // 停止当前播放（先移除事件处理器避免触发 onerror）
     if (audio) {
+      audio.onerror = null
+      audio.onended = null
       audio.pause()
       audio.src = ''
     }
@@ -102,7 +125,26 @@ export function useMusicPlayer(options: MusicPlayerOptions = {}) {
     audio.play().then(() => {
       isPlaying.value = true
       isPaused.value = false
-      setupMediaSession(song)
+      isUnlocked.value = true
+      // 设置 Media Session
+      if ('mediaSession' in navigator) {
+        try {
+          navigator.mediaSession.metadata = new MediaMetadata({
+            title: song.title,
+            artist: song.title_en,
+            album: '儿歌',
+            artwork: [
+              { src: '/rabbit.svg', sizes: '512x512', type: 'image/svg+xml' },
+            ],
+          })
+          navigator.mediaSession.setActionHandler('play', resume)
+          navigator.mediaSession.setActionHandler('pause', pause)
+          navigator.mediaSession.setActionHandler('stop', stop)
+          navigator.mediaSession.setActionHandler('nexttrack', () => next())
+        } catch (e) {
+          console.warn('[Music] Media Session 设置失败:', e)
+        }
+      }
     }).catch(e => {
       console.error('[Music] 播放失败:', e)
     })
@@ -162,6 +204,9 @@ export function useMusicPlayer(options: MusicPlayerOptions = {}) {
    */
   function stop(): void {
     if (audio) {
+      // 先移除事件处理器，避免触发 onerror
+      audio.onerror = null
+      audio.onended = null
       audio.pause()
       audio.src = ''
       audio = null
@@ -169,7 +214,18 @@ export function useMusicPlayer(options: MusicPlayerOptions = {}) {
     isPlaying.value = false
     isPaused.value = false
     currentSong.value = null
-    clearMediaSession()
+    // 清除 Media Session
+    if ('mediaSession' in navigator) {
+      try {
+        navigator.mediaSession.metadata = null
+        navigator.mediaSession.setActionHandler('play', null)
+        navigator.mediaSession.setActionHandler('pause', null)
+        navigator.mediaSession.setActionHandler('stop', null)
+        navigator.mediaSession.setActionHandler('nexttrack', null)
+      } catch (e) {
+        // 忽略
+      }
+    }
     console.log('[Music] 已停止')
   }
 
@@ -211,49 +267,6 @@ export function useMusicPlayer(options: MusicPlayerOptions = {}) {
     audio.volume = normalVolume
   }
 
-  /**
-   * 设置 Media Session
-   */
-  function setupMediaSession(song: Song): void {
-    if (!('mediaSession' in navigator)) return
-
-    try {
-      navigator.mediaSession.metadata = new MediaMetadata({
-        title: song.title,
-        artist: song.title_en,
-        album: '儿歌',
-        artwork: [
-          { src: '/rabbit.svg', sizes: '512x512', type: 'image/svg+xml' },
-        ],
-      })
-
-      navigator.mediaSession.setActionHandler('play', resume)
-      navigator.mediaSession.setActionHandler('pause', pause)
-      navigator.mediaSession.setActionHandler('stop', stop)
-      navigator.mediaSession.setActionHandler('nexttrack', () => next())
-
-    } catch (e) {
-      console.warn('[Music] Media Session 设置失败:', e)
-    }
-  }
-
-  /**
-   * 清除 Media Session
-   */
-  function clearMediaSession(): void {
-    if (!('mediaSession' in navigator)) return
-
-    try {
-      navigator.mediaSession.metadata = null
-      navigator.mediaSession.setActionHandler('play', null)
-      navigator.mediaSession.setActionHandler('pause', null)
-      navigator.mediaSession.setActionHandler('stop', null)
-      navigator.mediaSession.setActionHandler('nexttrack', null)
-    } catch (e) {
-      // 忽略
-    }
-  }
-
   return {
     // 状态
     songs,
@@ -261,8 +274,10 @@ export function useMusicPlayer(options: MusicPlayerOptions = {}) {
     isPlaying,
     isPaused,
     isDucked,
+    isUnlocked,
 
     // 方法
+    unlock,
     loadSongs,
     playSong,
     pause,

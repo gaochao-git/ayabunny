@@ -8,10 +8,11 @@ import { useSileroVAD } from '@/composables/useSileroVAD'
 import { useFunASRVAD } from '@/composables/useFunASRVAD'
 import { useBGM } from '@/composables/useBGM'
 import { useMusicPlayer } from '@/composables/useMusicPlayer'
-import { useSettingsStore, BACKGROUNDS, AVATARS } from '@/stores/settings'
+import { useSettingsStore, BACKGROUNDS, AVATARS, type AvatarType } from '@/stores/settings'
 import { transcribe } from '@/api/asr'
 import ChatArea from '@/components/ChatArea.vue'
 import RightPanel from '@/components/RightPanel.vue'
+import Avatar3D from '@/components/Avatar3D.vue'
 
 const settings = useSettingsStore()
 const chat = useChat()
@@ -64,6 +65,14 @@ const currentBackground = computed(() =>
 const currentAvatar = computed(() =>
   AVATARS.find(av => av.id === settings.avatar) || AVATARS[0]
 )
+
+// 将 avatar ID 映射到 3D 宠物类型
+const mascotType = computed(() => {
+  const avatarId = settings.avatar as string
+  if (avatarId === 'cat') return 'cat'
+  if (avatarId === 'bear') return 'bear'
+  return 'rabbit' // 默认兔子
+})
 
 // 背景样式
 const backgroundStyle = computed(() => ({
@@ -403,6 +412,7 @@ async function startCall() {
   // 移动端需要在用户交互时解锁音频
   await ttsPlayer.unlock()
   bgm.unlock()  // 同时解锁 BGM
+  musicPlayer.unlock()  // 解锁儿歌播放
   isInCall.value = true
   await startCallRecording()
 }
@@ -606,48 +616,20 @@ function clearChat() {
         <!-- 通话中：显示角色头像 -->
         <template v-if="isInCall">
           <div class="flex-1 flex flex-col items-center justify-center pb-16 bg-gradient-to-b from-white/50 to-white">
-            <!-- 角色头像区域 -->
-            <div class="relative">
-              <!-- 说话时的声波动效 -->
-              <div
-                v-if="ttsPlayer.isPlaying.value"
-                class="absolute inset-0 flex items-center justify-center"
-              >
-                <div class="absolute w-48 h-48 rounded-full bg-pink-200/30 animate-pulse"></div>
-                <div class="absolute w-40 h-40 rounded-full bg-pink-300/40 animate-ping-slow"></div>
-                <div class="absolute w-32 h-32 rounded-full bg-pink-400/30 animate-ping-slow animation-delay-200"></div>
-              </div>
-
-              <!-- 录音时的波纹 -->
-              <div
-                v-if="callRecorder.isRecording.value"
-                class="absolute inset-0 flex items-center justify-center"
-              >
-                <div class="absolute w-44 h-44 rounded-full border-4 border-green-300/50 animate-ping-slow"></div>
-                <div class="absolute w-36 h-36 rounded-full border-4 border-green-400/60 animate-ping-slow animation-delay-200"></div>
-              </div>
-
-              <!-- 头像 -->
-              <div
-                class="relative w-36 h-36 md:w-44 md:h-44 rounded-full bg-gradient-to-br from-pink-50 to-orange-50 flex items-center justify-center cursor-pointer transition-all duration-300 overflow-hidden border-4 border-white shadow-xl scale-105"
-                :class="{ 'animate-bounce-slow': ttsPlayer.isPlaying.value }"
-                @click="toggleCall"
-              >
-                <img
-                  :src="currentAvatar.file"
-                  :alt="currentAvatar.name"
-                  class="w-full h-full object-cover"
-                />
-              </div>
+            <!-- 3D 角色区域 -->
+            <div class="relative cursor-pointer" @click="toggleCall">
+              <!-- 3D 宠物 -->
+              <Avatar3D
+                :type="mascotType"
+                :is-listening="callRecorder.isRecording.value"
+                :is-thinking="chat.isLoading.value"
+                :is-speaking="ttsPlayer.isPlaying.value"
+                :size="280"
+              />
 
               <!-- 通话中红点 -->
-              <div class="absolute top-0 right-0 w-5 h-5 bg-red-500 rounded-full border-2 border-white animate-pulse"></div>
+              <div class="absolute top-0 right-4 w-5 h-5 bg-red-500 rounded-full border-2 border-white animate-pulse z-10"></div>
             </div>
-
-            <!-- 状态文字 -->
-            <p class="mt-6 text-lg font-medium text-pink-600">
-              {{ statusText }}
-            </p>
 
             <!-- 状态指示 -->
             <div class="flex gap-2 mt-3">
@@ -690,7 +672,11 @@ function clearChat() {
           />
           <!-- 无消息时显示欢迎界面 -->
           <div v-else class="flex-1 flex flex-col items-center justify-center text-center px-8">
-            <div class="text-6xl mb-4">{{ currentAvatar.icon }}</div>
+            <Avatar3D
+              :type="mascotType"
+              :size="200"
+              class="mb-2"
+            />
             <h2 class="text-xl font-semibold text-gray-700 mb-2">你好，我是{{ settings.assistantName || '小智' }}</h2>
             <p class="text-gray-500 text-sm mb-6">点击电话按钮开始语音对话，或直接输入文字</p>
           </div>

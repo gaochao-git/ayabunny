@@ -296,20 +296,31 @@ async def stream_agent_response(
                 # 工具调用完成
                 tool_name = event.get("name", "unknown")
                 tool_output = event_data.get("output", "")
-                yield f"data: {json.dumps({'type': 'skill_end', 'name': tool_name, 'output': str(tool_output)[:200]}, ensure_ascii=False)}\n\n"
+
+                # 提取实际的输出内容（可能是对象或字符串）
+                output_str = ""
+                if hasattr(tool_output, "content"):
+                    output_str = tool_output.content
+                elif isinstance(tool_output, str):
+                    output_str = tool_output
+                else:
+                    output_str = str(tool_output)
+
+                yield f"data: {json.dumps({'type': 'skill_end', 'name': tool_name, 'output': output_str[:200]}, ensure_ascii=False)}\n\n"
 
                 # 如果是音乐工具，解析输出并发送音乐控制事件
                 if tool_name in ["play_song", "pause_song", "resume_song", "stop_song", "next_song"]:
                     try:
-                        music_data = json.loads(tool_output)
+                        music_data = json.loads(output_str)
                         action = music_data.get("action")
                         if action and action != "none":
                             music_event = {"type": "music", "action": action}
                             if music_data.get("song"):
                                 music_event["song"] = music_data["song"]
                             yield f"data: {json.dumps(music_event, ensure_ascii=False)}\n\n"
-                    except (json.JSONDecodeError, TypeError):
-                        pass
+                            print(f"[Chat] 发送音乐事件: {music_event}")
+                    except (json.JSONDecodeError, TypeError) as e:
+                        print(f"[Chat] 解析音乐事件失败: {e}, output={output_str[:100]}")
 
         # 发送完成事件
         yield f"data: {json.dumps({'type': 'done'})}\n\n"

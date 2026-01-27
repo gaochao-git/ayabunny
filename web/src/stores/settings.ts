@@ -77,12 +77,11 @@ export const BACKGROUNDS = [
 
 export type BackgroundType = typeof BACKGROUNDS[number]['id']
 
-// 角色选项（暂时都用 rabbit.svg，后续可添加更多角色图片）
+// 角色选项（3D 宠物）
 export const AVATARS = [
-  { id: 'rabbit-girl', name: '小兔妹妹', icon: '🐰', file: '/rabbit.svg' },
-  { id: 'rabbit-boy', name: '小兔弟弟', icon: '🐇', file: '/rabbit.svg' },
-  { id: 'cat-girl', name: '小猫姐姐', icon: '🐱', file: '/rabbit.svg' },
-  { id: 'bear-boy', name: '小熊哥哥', icon: '🐻', file: '/rabbit.svg' },
+  { id: 'rabbit', name: '小兔兔', icon: '🐰', file: '/rabbit.svg' },
+  { id: 'cat', name: '小猫咪', icon: '🐱', file: '/rabbit.svg' },
+  { id: 'bear', name: '小熊熊', icon: '🐻', file: '/rabbit.svg' },
 ] as const
 
 export type AvatarType = typeof AVATARS[number]['id']
@@ -123,7 +122,7 @@ export const useSettingsStore = defineStore('settings', () => {
 
   // ========== 外观设置 ==========
   const background = ref<BackgroundType>(initial.background ?? 'sunset')  // 背景主题
-  const avatar = ref<AvatarType>(initial.avatar ?? 'rabbit-girl')         // 角色形象
+  const avatar = ref<AvatarType>(initial.avatar ?? 'rabbit')              // 角色形象
   const assistantName = ref(initial.assistantName ?? '小智')              // 助手名字
   const assistantAliases = ref<string[]>(initial.assistantAliases ?? ['小知', '小志'])  // 同音词/别名
 

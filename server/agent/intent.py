@@ -211,7 +211,7 @@ STORY_KEYWORDS = ["故事", "讲个", "讲一个", "想听", "睡前", "讲"]
 LIST_KEYWORDS = ["有什么故事", "有哪些故事", "故事列表", "都有什么"]
 
 # 儿歌相关关键词
-SONG_KEYWORDS = ["儿歌", "唱歌", "放歌", "播放", "唱首", "放首"]
+SONG_KEYWORDS = ["儿歌", "唱歌", "放歌", "播放", "唱首", "放首", "放一首歌", "唱一首", "来首歌", "来一首"]
 SONG_LIST_KEYWORDS = ["有什么儿歌", "有哪些歌", "儿歌列表", "能唱什么"]
 PAUSE_KEYWORDS = ["暂停", "停一下", "等一下", "别唱了", "先停下"]
 RESUME_KEYWORDS = ["继续", "继续播放", "接着放", "继续唱"]
@@ -303,11 +303,11 @@ def quick_intent_check(user_input: str) -> tuple[str, str | None]:
         if kw in text:
             return ("list_stories", None)
 
-    # 4. 检查是否包含儿歌关键词
+    # 4. 检查是否包含儿歌关键词 → 走 Agent（让 LLM 提取歌曲名）
     has_song_keyword = any(kw in text for kw in SONG_KEYWORDS)
     if has_song_keyword:
-        # 包含儿歌关键词，需要 LLM 提取具体歌曲名
-        return ("need_llm", None)
+        # 包含儿歌关键词，走 Agent 让 LLM 处理（可以提取具体歌曲名）
+        return ("chat", None)
 
     # 5. 尝试直接匹配故事名（如用户直接说"白雪公主"）
     matched_story = match_story_name(text)
