@@ -415,10 +415,12 @@ async function handleSave() {
       })
     }
     showEditor.value = false
+    stopPreviewBGM()
     await loadStories()
-  } catch (error) {
+  } catch (error: any) {
     console.error('Failed to save story:', error)
-    alert('保存失败')
+    const message = error?.response?.data?.detail || error?.message || '未知错误'
+    alert(`保存失败: ${message}`)
   }
 }
 
@@ -427,9 +429,10 @@ async function handleDelete(story: Story) {
   try {
     await deleteStory(SKILL_ID, story.id)
     await loadStories()
-  } catch (error) {
+  } catch (error: any) {
     console.error('Failed to delete story:', error)
-    alert('删除失败')
+    const message = error?.response?.data?.detail || error?.message || '未知错误'
+    alert(`删除失败: ${message}`)
   }
 }
 
@@ -444,7 +447,8 @@ async function handleGenerate() {
     form.value.content = result.content
   } catch (error: any) {
     console.error('Failed to generate story:', error)
-    alert('生成失败: ' + (error.message || '未知错误'))
+    const message = error?.response?.data?.detail || error?.message || '未知错误'
+    alert(`生成失败: ${message}`)
   } finally {
     isGenerating.value = false
   }
