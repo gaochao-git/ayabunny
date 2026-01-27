@@ -35,21 +35,6 @@ onUnmounted(() => {
   window.removeEventListener('beforeunload', handleBeforeUnload)
 })
 
-// 记录是否正在讲故事
-const isStoryMode = ref(false)
-
-// 监听技能变化，讲故事时播放背景音乐
-watch(() => chat.currentSkill.value, (skill, oldSkill) => {
-  console.log('[BGM] 技能变化:', oldSkill, '->', skill, '| BGM:', chat.currentBgm.value)
-  // 检测 tell_story 技能（兼容不同格式）
-  if (skill && (skill === 'tell_story' || skill.includes('tell_story'))) {
-    console.log('[BGM] 检测到讲故事技能，尝试播放背景音乐, bgm:', chat.currentBgm.value)
-    isStoryMode.value = true
-    // 传递故事指定的 BGM（如果有），否则随机播放
-    bgm.play(chat.currentBgm.value)
-  }
-})
-
 // 用于前向引用的变量
 let startCallRecording: () => Promise<void>
 let ttsPlayer: ReturnType<typeof useTTSPlayer>
@@ -246,18 +231,12 @@ ttsPlayer = useTTSPlayer({
     if (isInCall.value && !callRecorder.isRecording.value && !isProcessingCall.value) {
       startCallRecording()
     }
-    // 故事模式：TTS 队列播完后立即停止背景音乐
-    if (isStoryMode.value && !ttsPlayer.isPending.value) {
-      console.log('[BGM] 故事播放完毕，停止背景音乐')
-      isStoryMode.value = false
-      bgm.stop()  // 立即渐出停止
-    }
   },
 })
 
 // 监听 TTS 播放状态，实现音频闪避（TTS 播放时降低 BGM 音量）
 watch(() => ttsPlayer.isPlaying.value, (playing) => {
-  if (isStoryMode.value && bgm.isPlaying.value) {
+  if (bgm.isPlaying.value) {
     if (playing) {
       bgm.duck()  // TTS 开始播放，降低 BGM 音量
     } else {
@@ -367,8 +346,7 @@ function endCall() {
   ttsPlayer.stop()  // 会清空 TTS 队列
   vad.stop()
 
-  // 停止背景音乐（无论是否在故事模式）
-  isStoryMode.value = false
+  // 停止背景音乐
   bgm.stop()
 }
 
@@ -465,6 +443,18 @@ function handleKeydown(e: KeyboardEvent) {
   }
 }
 
+// 切换背景音乐
+function toggleBGM() {
+  // 用户交互时解锁音频（移动端需要）
+  bgm.unlock()
+
+  if (bgm.isPlaying.value) {
+    bgm.stop()
+  } else {
+    bgm.play()
+  }
+}
+
 // 清空对话
 function clearChat() {
   chat.clear()
@@ -497,6 +487,23 @@ function clearChat() {
             <span class="text-white text-lg font-semibold">{{ settings.assistantName || '小智' }}</span>
           </div>
           <div class="flex items-center gap-2">
+            <!-- BGM 开关按钮 -->
+            <button
+              @click="toggleBGM"
+              :class="[
+                'p-1.5 rounded-lg transition-colors',
+                bgm.isPlaying.value ? 'bg-white/40' : 'bg-white/20 hover:bg-white/30'
+              ]"
+              :title="bgm.isPlaying.value ? '关闭背景音乐' : '开启背景音乐'"
+            >
+              <svg v-if="bgm.isPlaying.value" class="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/>
+              </svg>
+              <svg v-else class="w-5 h-5 text-white/60" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/>
+                <path d="M3.27 3L2 4.27l9 9v.28c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4v-1.73l5.73 5.73L20 19.73 3.27 3z" fill-opacity="0.3"/>
+              </svg>
+            </button>
             <button
               @click="clearChat"
               class="px-3 py-1.5 bg-white/20 hover:bg-white/30 text-white text-sm rounded-lg transition-colors"
