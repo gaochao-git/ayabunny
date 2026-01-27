@@ -262,7 +262,13 @@ ttsPlayer = useTTSPlayer({
     vad.stop()
     // 通话中自动继续录音（检查状态避免并发）
     if (isInCall.value && !callRecorder.isRecording.value && !isProcessingCall.value) {
-      startCallRecording()
+      // 如果儿歌正在播放，启用 VAD 监听用户说话，而不是直接录音
+      if (musicPlayer.isPlaying.value) {
+        console.log('[Call] 儿歌播放中，启用 VAD 监听')
+        vad.start()
+      } else {
+        startCallRecording()
+      }
     }
   },
 })
@@ -282,6 +288,28 @@ watch(() => ttsPlayer.isPlaying.value, (playing) => {
       musicPlayer.duck()
     } else {
       musicPlayer.unduck()
+    }
+  }
+})
+
+// 监听儿歌播放状态变化
+watch(() => musicPlayer.isPlaying.value, (playing) => {
+  if (!isInCall.value) return
+
+  if (playing) {
+    // 儿歌开始播放，停止当前录音，启用 VAD 监听
+    if (callRecorder.isRecording.value) {
+      console.log('[Call] 儿歌开始，停止录音，启用 VAD')
+      callRecorder.stopRecording()
+    }
+    vad.start()
+  } else {
+    // 儿歌停止，如果没有在录音也没有 TTS 播放，开始录音
+    console.log('[Call] 儿歌停止')
+    vad.stop()
+    if (!callRecorder.isRecording.value && !ttsPlayer.isPlaying.value && !isProcessingCall.value) {
+      console.log('[Call] 恢复录音')
+      startCallRecording()
     }
   }
 })
@@ -425,7 +453,7 @@ function endCall() {
   isInCall.value = false
   isProcessingCall.value = false  // 重置处理状态
 
-  // 停止所有活动
+  // 停止通话相关活动
   chat.abort()  // 取消 LLM 请求
   if (callRecorder.isRecording.value) {
     callRecorder.stopRecording()
@@ -433,9 +461,8 @@ function endCall() {
   ttsPlayer.stop()  // 会清空 TTS 队列
   vad.stop()
 
-  // 停止背景音乐和儿歌
-  bgm.stop()
-  musicPlayer.stop()
+  // 注意：不停止儿歌，让用户可以继续听
+  // 用户可以说"停止"来手动停止儿歌
 }
 
 // 开始通话录音
