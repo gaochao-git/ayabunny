@@ -101,12 +101,26 @@ ttsPlayer = useTTSPlayer({
       startCallRecording()
     }
     // 故事模式：TTS 队列播完后立即停止背景音乐
-    if (isStoryMode.value && !ttsPlayer.isPending.value) {
-      console.log('[BGM] 故事播放完毕，停止背景音乐')
-      isStoryMode.value = false
-      bgm.stop()  // 立即渐出停止
-    }
+    // 使用 setTimeout 延迟访问 ttsPlayer，避免前向引用问题
+    setTimeout(() => {
+      if (isStoryMode.value && !ttsPlayer.isPending.value) {
+        console.log('[BGM] 故事播放完毕，停止背景音乐')
+        isStoryMode.value = false
+        bgm.stop()  // 立即渐出停止
+      }
+    }, 0)
   },
+})
+
+// 监听 TTS 播放状态，实现音频闪避（TTS 播放时降低 BGM 音量）
+watch(() => ttsPlayer.isPlaying.value, (playing) => {
+  if (isStoryMode.value && bgm.isPlaying.value) {
+    if (playing) {
+      bgm.duck()  // TTS 开始播放，降低 BGM 音量
+    } else {
+      bgm.unduck()  // TTS 停止播放，恢复 BGM 音量
+    }
+  }
 })
 
 // 唤醒词 ASR 识别函数
@@ -355,6 +369,12 @@ function endCall() {
   }
   ttsPlayer.stop()  // 会清空 TTS 队列
   vad.stop()
+
+  // 停止背景音乐
+  if (isStoryMode.value) {
+    isStoryMode.value = false
+    bgm.stop()
+  }
 }
 
 // 开始通话录音

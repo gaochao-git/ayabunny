@@ -320,11 +320,48 @@ async function handleUploadBGM(event: Event) {
 }
 
 // 试听 BGM
+let previewAudio: HTMLAudioElement | null = null
+const isPreviewPlaying = ref(false)
+
 function previewBGM(bgmId: string) {
   if (!bgmId) return
-  const audio = new Audio(`/bgm/${bgmId}`)
-  audio.volume = 0.5
-  audio.play().catch(e => console.warn('播放失败:', e))
+
+  // 如果正在播放同一个，则暂停
+  if (previewAudio && isPreviewPlaying.value) {
+    previewAudio.pause()
+    previewAudio = null
+    isPreviewPlaying.value = false
+    return
+  }
+
+  // 停止之前的播放
+  if (previewAudio) {
+    previewAudio.pause()
+  }
+
+  previewAudio = new Audio(`/bgm/${bgmId}`)
+  previewAudio.volume = 0.5
+
+  previewAudio.onended = () => {
+    isPreviewPlaying.value = false
+    previewAudio = null
+  }
+
+  previewAudio.play().then(() => {
+    isPreviewPlaying.value = true
+  }).catch(e => {
+    console.warn('播放失败:', e)
+    isPreviewPlaying.value = false
+  })
+}
+
+// 停止试听
+function stopPreviewBGM() {
+  if (previewAudio) {
+    previewAudio.pause()
+    previewAudio = null
+  }
+  isPreviewPlaying.value = false
 }
 
 async function loadStories() {
@@ -972,14 +1009,14 @@ onUnmounted(() => {
         <div
           v-if="showEditor"
           class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
-          @click.self="showEditor = false"
+          @click.self="showEditor = false; stopPreviewBGM()"
         >
           <div class="bg-white rounded-xl w-full max-w-2xl max-h-[90vh] flex flex-col">
             <div class="flex items-center justify-between p-4 border-b">
               <h2 class="text-lg font-semibold">
                 {{ editingStory ? '编辑故事' : '添加故事' }}
               </h2>
-              <button @click="showEditor = false" class="p-2 hover:bg-gray-100 rounded-lg">
+              <button @click="showEditor = false; stopPreviewBGM()" class="p-2 hover:bg-gray-100 rounded-lg">
                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
                 </svg>
@@ -1045,15 +1082,23 @@ onUnmounted(() => {
                       </option>
                     </optgroup>
                   </select>
-                  <!-- 试听按钮 -->
+                  <!-- 试听/暂停按钮 -->
                   <button
                     v-if="form.bgm"
                     @click="previewBGM(form.bgm!)"
                     type="button"
-                    class="px-3 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
-                    title="试听"
+                    :class="[
+                      'px-3 py-2 rounded-lg transition-colors',
+                      isPreviewPlaying ? 'bg-pink-100 hover:bg-pink-200' : 'bg-gray-100 hover:bg-gray-200'
+                    ]"
+                    :title="isPreviewPlaying ? '暂停' : '试听'"
                   >
-                    <svg class="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <!-- 暂停图标 -->
+                    <svg v-if="isPreviewPlaying" class="w-5 h-5 text-pink-600" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z" />
+                    </svg>
+                    <!-- 播放图标 -->
+                    <svg v-else class="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
                       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                     </svg>
@@ -1078,7 +1123,7 @@ onUnmounted(() => {
             </div>
 
             <div class="flex justify-end gap-3 p-4 border-t">
-              <button @click="showEditor = false" class="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg">
+              <button @click="showEditor = false; stopPreviewBGM()" class="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg">
                 取消
               </button>
               <button @click="handleSave" class="px-4 py-2 bg-pink-500 hover:bg-pink-600 text-white rounded-lg">

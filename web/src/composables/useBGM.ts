@@ -24,10 +24,14 @@ const BGM_LIST = [
 
 export function useBGM(options: BGMOptions = {}) {
   const isPlaying = ref(false)
+  const isDucked = ref(false)  // 是否处于闪避状态（TTS 播放时降低音量）
   let currentAudio: HTMLAudioElement | null = null
-  let readyToPlay = false  // 音频是否已解锁
+  let unlockedAudio: HTMLAudioElement | null = null  // 预解锁的音频对象
+  let pendingBgmId: string | null = null  // 等待播放的 BGM
   let currentTrack: typeof BGM_LIST[0] | null = null
   let fadeTimer: ReturnType<typeof setInterval> | null = null  // 淡入淡出定时器
+  let normalVolume = 0.6  // 正常音量
+  const DUCK_VOLUME = 0.15  // 闪避时的音量（TTS 播放时）
 
   /**
    * 设置 Media Session 元数据（让手机控制中心显示音乐信息）
@@ -94,21 +98,41 @@ export function useBGM(options: BGMOptions = {}) {
 
   /**
    * 在用户交互时解锁音频（移动端必须）
+   * 预加载一个真实的 BGM 文件，确保后续可以播放
    */
   function unlock(): void {
-    if (readyToPlay) return
+    if (unlockedAudio) {
+      console.log('[BGM] 已经解锁过了')
+      // 如果有待播放的 BGM，现在播放
+      if (pendingBgmId !== null) {
+        const bgmId = pendingBgmId
+        pendingBgmId = null
+        play(bgmId)
+      }
+      return
+    }
 
-    console.log('[BGM] 尝试解锁音频...')
+    console.log('[BGM] 尝试解锁音频（预加载 BGM）...')
 
-    // 创建一个短音频来解锁
-    const audio = new Audio()
-    audio.src = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA='
-    audio.volume = 0.001
+    // 随机选择一个 BGM 预加载
+    const track = BGM_LIST[Math.floor(Math.random() * BGM_LIST.length)]
+    const audio = new Audio(track.url)
+    audio.loop = true
+    audio.volume = 0.001  // 几乎静音
 
     audio.play().then(() => {
+      // 立即暂停，但保留这个已解锁的 audio 对象
       audio.pause()
-      readyToPlay = true
-      console.log('[BGM] 音频已解锁')
+      audio.currentTime = 0
+      unlockedAudio = audio
+      console.log('[BGM] 音频已解锁，预加载:', track.title)
+
+      // 如果有待播放的 BGM，现在播放
+      if (pendingBgmId !== null) {
+        const bgmId = pendingBgmId
+        pendingBgmId = null
+        play(bgmId)
+      }
     }).catch(e => {
       console.warn('[BGM] 解锁失败:', e)
     })
@@ -119,7 +143,7 @@ export function useBGM(options: BGMOptions = {}) {
    * @param bgmId 可选，指定要播放的 BGM 文件名（如 "sweet-dreams.mp3" 或 "custom/xxx.mp3"）
    */
   function play(bgmId?: string | null): void {
-    console.log('[BGM] play() 被调用, bgmId:', bgmId, 'isPlaying:', isPlaying.value)
+    console.log('[BGM] play() 被调用, bgmId:', bgmId, 'isPlaying:', isPlaying.value, 'unlocked:', !!unlockedAudio)
 
     if (options.enabled && !options.enabled()) {
       console.log('[BGM] 背景音乐已禁用')
@@ -128,6 +152,13 @@ export function useBGM(options: BGMOptions = {}) {
 
     if (isPlaying.value) {
       console.log('[BGM] 已在播放中')
+      return
+    }
+
+    // 如果还没有解锁，保存待播放的 BGM，等待解锁
+    if (!unlockedAudio) {
+      console.log('[BGM] 还未解锁，等待用户交互...')
+      pendingBgmId = bgmId ?? ''
       return
     }
 
@@ -153,18 +184,17 @@ export function useBGM(options: BGMOptions = {}) {
     currentTrack = track
     console.log('[BGM] 准备播放:', track.title, track.url)
 
-    const audio = new Audio(track.url)
+    // 复用已解锁的 audio 对象
+    const audio = unlockedAudio!
+
+    // 如果 URL 不同，需要更换
+    if (audio.src !== new URL(track.url, location.origin).href) {
+      audio.src = track.url
+    }
+
     audio.loop = true
     audio.volume = 0
-
-    // 监听加载事件
-    audio.addEventListener('canplaythrough', () => {
-      console.log('[BGM] 音频已加载完成')
-    })
-
-    audio.addEventListener('error', (e) => {
-      console.error('[BGM] 音频加载错误:', e)
-    })
+    audio.currentTime = 0
 
     // 尝试播放
     const playPromise = audio.play()
@@ -173,15 +203,16 @@ export function useBGM(options: BGMOptions = {}) {
       playPromise.then(() => {
         currentAudio = audio
         isPlaying.value = true
-        readyToPlay = true  // 成功播放说明已解锁
         fadeIn(audio, options.volume?.() ?? 0.6, 2000)
         setupMediaSession(track)
-        console.log('[BGM] 播放成功')
+        console.log('[BGM] 播放成功:', track.title)
       }).catch(e => {
         console.warn('[BGM] 播放失败:', e.name, e.message)
-        // 如果是自动播放策略阻止，等待用户下次交互
+        // 如果是自动播放策略阻止，保存待播放状态
         if (e.name === 'NotAllowedError') {
           console.log('[BGM] 需要用户交互才能播放，等待下次交互...')
+          pendingBgmId = bgmId ?? ''
+          unlockedAudio = null  // 重置，需要重新解锁
         }
       })
     }
@@ -277,18 +308,86 @@ export function useBGM(options: BGMOptions = {}) {
     }, stepTime)
   }
 
+  /**
+   * 音频闪避 - TTS 播放时降低 BGM 音量
+   */
+  function duck(): void {
+    if (!currentAudio || isDucked.value) return
+
+    console.log('[BGM] 音频闪避: 降低音量')
+    isDucked.value = true
+    normalVolume = currentAudio.volume  // 保存当前音量
+
+    // 快速淡出到闪避音量
+    cancelFade()
+    const startVolume = currentAudio.volume
+    const steps = 10
+    const stepTime = 200 / steps  // 200ms 内完成
+    const volumeStep = (startVolume - DUCK_VOLUME) / steps
+    let currentStep = 0
+
+    fadeTimer = setInterval(() => {
+      currentStep++
+      if (currentAudio) {
+        currentAudio.volume = Math.max(DUCK_VOLUME, startVolume - volumeStep * currentStep)
+      }
+      if (currentStep >= steps) {
+        cancelFade()
+        if (currentAudio) currentAudio.volume = DUCK_VOLUME
+      }
+    }, stepTime)
+  }
+
+  /**
+   * 取消音频闪避 - TTS 停止时恢复 BGM 音量
+   */
+  function unduck(): void {
+    if (!currentAudio || !isDucked.value) return
+
+    console.log('[BGM] 取消闪避: 恢复音量')
+    isDucked.value = false
+
+    // 淡入恢复到正常音量
+    cancelFade()
+    const targetVolume = options.volume?.() ?? normalVolume
+    const startVolume = currentAudio.volume
+    const steps = 10
+    const stepTime = 300 / steps  // 300ms 内完成
+    const volumeStep = (targetVolume - startVolume) / steps
+    let currentStep = 0
+
+    fadeTimer = setInterval(() => {
+      currentStep++
+      if (currentAudio) {
+        currentAudio.volume = Math.min(targetVolume, startVolume + volumeStep * currentStep)
+      }
+      if (currentStep >= steps) {
+        cancelFade()
+        if (currentAudio) currentAudio.volume = targetVolume
+      }
+    }, stepTime)
+  }
+
   // 监听音量设置变化
   if (options.volume) {
     watch(options.volume, (newVolume) => {
-      setVolume(newVolume)
+      // 如果正在闪避状态，只更新保存的正常音量，不改变当前音量
+      if (isDucked.value) {
+        normalVolume = newVolume
+      } else {
+        setVolume(newVolume)
+      }
     })
   }
 
   return {
     isPlaying,
+    isDucked,
     play,
     stop,
     setVolume,
+    duck,      // TTS 播放时调用
+    unduck,    // TTS 停止时调用
     unlock,
     preload: unlock,  // 兼容
     tryResumePending: unlock,  // 兼容
