@@ -1,0 +1,25 @@
+{
+  "songs": [
+    {
+      "id": "twinkle",
+      "title": "小星星",
+      "title_en": "Twinkle Twinkle Little Star",
+      "file": "twinkle.mp3",
+      "keywords": ["小星星", "星星", "twinkle", "一闪一闪"]
+    },
+    {
+      "id": "row-boat",
+      "title": "划小船",
+      "title_en": "Row Row Row Your Boat",
+      "file": "row-boat.mp3",
+      "keywords": ["划船", "小船", "row", "船"]
+    },
+    {
+      "id": "baa-baa",
+      "title": "黑绵羊",
+      "title_en": "Baa Baa Black Sheep",
+      "file": "baa-baa.mp3",
+      "keywords": ["黑绵羊", "绵羊", "羊", "baa"]
+    }
+  ]
+}

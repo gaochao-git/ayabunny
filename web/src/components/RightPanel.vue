@@ -3,6 +3,7 @@ import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useSettingsStore, ASR_SERVICES, LLM_MODELS, TTS_MODELS, TTS_VOICES, DEFAULT_TTS_VOICES, VAD_TYPES, BACKGROUNDS, AVATARS } from '@/stores/settings'
 import { getSkills, getStories, createStory, updateStory, deleteStory, generateStory, type Story, type SkillSummary } from '@/api/skills'
 import { getBGMList, uploadBGM, type BGMItem } from '@/api/bgm'
+import { getSongs, getSongAudioUrl, uploadSong, deleteSong, type Song } from '@/api/songs'
 import { getCustomVoices, createCustomVoice, deleteCustomVoice, testCustomVoice, getVoiceAudioUrl, type CustomVoice } from '@/api/tts'
 
 const settings = useSettingsStore()
@@ -272,17 +273,75 @@ function formatTime(seconds: number): string {
 const availableSkills = ref<SkillSummary[]>([])
 const currentSkillId = ref('storytelling')
 
-// 技能显示名称映射
+// 技能配置
+const skillConfig: Record<string, { label: string; icon: string; unit: string; placeholder: { title: string; content: string }; hint?: string; isAudio?: boolean }> = {
+  storytelling: {
+    label: '故事',
+    icon: '📖',
+    unit: '个故事',
+    placeholder: {
+      title: '输入故事名称，如：白雪公主',
+      content: '故事内容（支持 Markdown 格式）',
+    },
+  },
+  poetry: {
+    label: '古诗',
+    icon: '📜',
+    unit: '首古诗',
+    placeholder: {
+      title: '输入诗词名称，如：静夜思',
+      content: '作者\n\n诗句第一行\n\n诗句第二行\n\n---\n\n**讲给宝宝听**\n\n简单的解释',
+    },
+    hint: '格式：作者 → 诗句 → 分隔线(---) → 讲给宝宝听',
+  },
+  english: {
+    label: '英语',
+    icon: '🔤',
+    unit: '个分类',
+    placeholder: {
+      title: '输入分类名称，如：水果、动物',
+      content: '# 单词 Word\n\n**读音**: /音标/\n\n**跟我说**: 简单例句\n\n**一起玩**: 互动建议',
+    },
+    hint: '每个单词包含：音标、例句、互动游戏',
+  },
+  songs: {
+    label: '儿歌',
+    icon: '🎵',
+    unit: '首儿歌',
+    placeholder: {
+      title: '歌曲名称',
+      content: '',
+    },
+    hint: '儿歌为音频文件，需上传 MP3',
+    isAudio: true,
+  },
+}
+
+// 当前技能配置
+const currentConfig = computed(() => skillConfig[currentSkillId.value] || skillConfig.storytelling)
+
+// 技能显示名称映射（兼容旧代码）
 const skillLabels: Record<string, string> = {
   storytelling: '故事',
   poetry: '古诗',
+  english: '英语',
+  songs: '儿歌',
 }
 
 const stories = ref<Story[]>([])
+const songsList = ref<Song[]>([])
 const isLoading = ref(false)
 const showEditor = ref(false)
 const editingStory = ref<Story | null>(null)
 const isGenerating = ref(false)
+
+// 儿歌上传相关
+const showSongUploader = ref(false)
+const isUploadingSong = ref(false)
+const newSongTitle = ref('')
+const newSongTitleEn = ref('')
+const newSongKeywords = ref('')
+const newSongFile = ref<File | null>(null)
 
 // BGM 列表
 const bgmList = ref<BGMItem[]>([])
@@ -292,12 +351,11 @@ const isUploadingBGM = ref(false)
 const form = ref({
   title: '',
   content: '',
-  bgm: '' as string | null,  // BGM 文件名
 })
 
 // 加载 BGM 列表
 async function loadBGMList() {
-  if (bgmList.value.length > 0) return  // 已加载过
+  if (isLoadingBGM.value) return  // 正在加载
   isLoadingBGM.value = true
   try {
     bgmList.value = await getBGMList()
@@ -318,7 +376,6 @@ async function handleUploadBGM(event: Event) {
   try {
     const newBGM = await uploadBGM(file)
     bgmList.value.push(newBGM)
-    form.value.bgm = newBGM.id  // 自动选中新上传的
   } catch (error: any) {
     console.error('Failed to upload BGM:', error)
     alert('上传失败: ' + (error.message || '未知错误'))
@@ -378,18 +435,163 @@ async function loadSkills() {
   try {
     const skills = await getSkills()
     // 只保留有 contentDir 的技能（可管理内容的技能）
-    availableSkills.value = skills.filter(s =>
-      s.id === 'storytelling' || s.id === 'poetry'
+    const filteredSkills = skills.filter(s =>
+      s.id === 'storytelling' || s.id === 'poetry' || s.id === 'english'
     )
+    // 手动添加 songs 技能（它有独立 API）
+    filteredSkills.push({
+      id: 'songs',
+      name: '儿歌',
+      version: '1.0.0',
+      icon: '🎵',
+      keywords: ['儿歌', '歌曲'],
+      triggers: [],
+      tools: ['play_song'],
+    })
+    availableSkills.value = filteredSkills
   } catch (error) {
     console.error('Failed to load skills:', error)
   }
 }
 
+// 加载儿歌列表
+async function loadSongsList() {
+  isLoading.value = true
+  try {
+    songsList.value = await getSongs()
+  } catch (error) {
+    console.error('Failed to load songs:', error)
+  } finally {
+    isLoading.value = false
+  }
+}
+
+// 处理儿歌文件选择
+function handleSongFileSelect(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (file) {
+    newSongFile.value = file
+    // 如果没有填写标题，用文件名（去掉扩展名）作为默认标题
+    if (!newSongTitle.value) {
+      newSongTitle.value = file.name.replace(/\.[^/.]+$/, '')
+    }
+  }
+}
+
+// 上传儿歌
+async function handleUploadSong() {
+  if (!newSongFile.value || !newSongTitle.value.trim()) {
+    alert('请选择文件并填写歌曲名称')
+    return
+  }
+
+  isUploadingSong.value = true
+  try {
+    const keywords = newSongKeywords.value
+      .split(/[,，]/)
+      .map(k => k.trim())
+      .filter(k => k)
+
+    await uploadSong(
+      newSongFile.value,
+      newSongTitle.value.trim(),
+      newSongTitleEn.value.trim() || undefined,
+      keywords.length > 0 ? keywords : undefined
+    )
+
+    // 重置表单
+    newSongFile.value = null
+    newSongTitle.value = ''
+    newSongTitleEn.value = ''
+    newSongKeywords.value = ''
+    showSongUploader.value = false
+
+    // 重新加载列表
+    await loadSongsList()
+  } catch (error: any) {
+    console.error('Failed to upload song:', error)
+    alert('上传失败: ' + (error.message || '未知错误'))
+  } finally {
+    isUploadingSong.value = false
+  }
+}
+
+// 删除儿歌
+async function handleDeleteSong(song: Song) {
+  if (!confirm(`确定要删除「${song.title}」吗？`)) return
+
+  try {
+    await deleteSong(song.id)
+    await loadSongsList()
+  } catch (error: any) {
+    console.error('Failed to delete song:', error)
+    alert('删除失败: ' + (error.message || '未知错误'))
+  }
+}
+
+// 试播放儿歌
+let songPreviewAudio: HTMLAudioElement | null = null
+const playingSongId = ref<string | null>(null)
+
+function previewSong(song: Song) {
+  // 如果正在播放同一首，则停止
+  if (playingSongId.value === song.id) {
+    stopSongPreview()
+    return
+  }
+
+  // 停止之前的播放
+  stopSongPreview()
+
+  // 播放新的
+  songPreviewAudio = new Audio(getSongAudioUrl(song.file))
+  songPreviewAudio.volume = 0.8
+
+  songPreviewAudio.onended = () => {
+    playingSongId.value = null
+    songPreviewAudio = null
+  }
+
+  songPreviewAudio.onerror = () => {
+    playingSongId.value = null
+    songPreviewAudio = null
+    alert('播放失败，音频文件可能不存在')
+  }
+
+  songPreviewAudio.play().then(() => {
+    playingSongId.value = song.id
+  }).catch(e => {
+    console.warn('播放失败:', e)
+    alert('播放失败: ' + e.message)
+  })
+}
+
+function stopSongPreview() {
+  if (songPreviewAudio) {
+    songPreviewAudio.pause()
+    songPreviewAudio = null
+  }
+  playingSongId.value = null
+}
+
+// 取消上传儿歌
+function cancelSongUpload() {
+  newSongFile.value = null
+  newSongTitle.value = ''
+  newSongTitleEn.value = ''
+  newSongKeywords.value = ''
+  showSongUploader.value = false
+}
+
 // 切换技能
 function switchSkill(skillId: string) {
   currentSkillId.value = skillId
-  loadStories()
+  if (skillId === 'songs') {
+    loadSongsList()
+  } else {
+    loadStories()
+  }
 }
 
 async function loadStories() {
@@ -405,19 +607,16 @@ async function loadStories() {
 
 function openCreate() {
   editingStory.value = null
-  form.value = { title: '', content: '', bgm: '' }
-  loadBGMList()  // 加载 BGM 列表
+  form.value = { title: '', content: '' }
   showEditor.value = true
 }
 
 async function openEdit(story: Story) {
   editingStory.value = story
-  loadBGMList()  // 加载 BGM 列表
   const fullStory = await import('@/api/skills').then(m => m.getStory(currentSkillId.value, story.id))
   form.value = {
     title: fullStory.title,
     content: fullStory.content?.replace(/^#\s+.+\n\n/, '') || '',
-    bgm: fullStory.bgm || '',
   }
   showEditor.value = true
 }
@@ -433,17 +632,14 @@ async function handleSave() {
       await updateStory(currentSkillId.value, editingStory.value.id, {
         title: form.value.title,
         content: form.value.content,
-        bgm: form.value.bgm || null,
       })
     } else {
       await createStory(currentSkillId.value, {
         title: form.value.title,
         content: form.value.content,
-        bgm: form.value.bgm || null,
       })
     }
     showEditor.value = false
-    stopPreviewBGM()
     await loadStories()
   } catch (error: any) {
     console.error('Failed to save story:', error)
@@ -495,6 +691,8 @@ onMounted(() => {
   loadCustomVoices()
   // 加载可用技能
   loadSkills()
+  // 加载 BGM 列表
+  loadBGMList()
 
   if (activeTab.value === 'stories') {
     loadStories()
@@ -509,6 +707,10 @@ onUnmounted(() => {
   if (mediaRecorder && isRecording.value) {
     mediaRecorder.stop()
   }
+  // 停止儿歌试听
+  stopSongPreview()
+  // 停止BGM试听
+  stopPreviewBGM()
 })
 </script>
 
@@ -696,6 +898,68 @@ onUnmounted(() => {
           </div>
         </section>
 
+        <!-- 背景音乐 -->
+        <section class="space-y-2">
+          <div class="inline-block px-2 py-0.5 rounded text-xs font-semibold bg-yellow-100 text-yellow-600">
+            背景音乐
+          </div>
+          <div class="bg-white border rounded-lg p-3">
+            <!-- 开关和音量 -->
+            <div class="flex items-center justify-between mb-3">
+              <span class="text-sm text-gray-600">讲故事时播放</span>
+              <label class="relative inline-flex items-center cursor-pointer">
+                <input type="checkbox" v-model="settings.bgmEnabled" class="sr-only peer" />
+                <div class="w-9 h-5 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-yellow-500"></div>
+              </label>
+            </div>
+            <div v-if="settings.bgmEnabled" class="flex items-center gap-2 mb-3">
+              <span class="text-xs text-gray-500">音量</span>
+              <input type="range" v-model.number="settings.bgmVolume" min="0" max="1" step="0.1" class="flex-1 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-yellow-500" />
+              <span class="text-xs text-gray-500 w-8">{{ Math.round(settings.bgmVolume * 100) }}%</span>
+            </div>
+            <!-- 音乐列表 -->
+            <div v-if="settings.bgmEnabled" class="space-y-2">
+              <div class="flex items-center justify-between">
+                <span class="text-xs text-gray-500">音乐库</span>
+                <label class="px-2 py-1 bg-yellow-100 hover:bg-yellow-200 text-yellow-700 text-xs rounded-lg transition-colors cursor-pointer flex items-center gap-1">
+                  <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+                  </svg>
+                  <span>{{ isUploadingBGM ? '上传中...' : '上传音乐' }}</span>
+                  <input
+                    type="file"
+                    accept=".mp3,.wav,.ogg,.m4a"
+                    class="hidden"
+                    :disabled="isUploadingBGM"
+                    @change="handleUploadBGM"
+                  />
+                </label>
+              </div>
+              <div v-if="bgmList.length > 0" class="max-h-32 overflow-y-auto space-y-1">
+                <div
+                  v-for="bgm in bgmList"
+                  :key="bgm.id"
+                  class="flex items-center justify-between p-2 bg-gray-50 rounded-lg text-sm"
+                >
+                  <span class="truncate flex-1">{{ bgm.preset ? '🎵' : '📁' }} {{ bgm.name }}</span>
+                  <button
+                    @click="previewBGM(bgm.id)"
+                    class="p-1 hover:bg-yellow-100 rounded transition-colors flex-shrink-0"
+                    title="试听"
+                  >
+                    <svg class="w-4 h-4 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+              <p v-else class="text-xs text-gray-400 text-center py-2">加载中...</p>
+            </div>
+            <p class="text-xs text-gray-400 mt-2">讲故事时会随机播放音乐库中的背景音乐</p>
+          </div>
+        </section>
+
       </div>
 
       <!-- 高级配置 -->
@@ -810,21 +1074,6 @@ onUnmounted(() => {
                 <span class="text-sm font-medium">{{ settings.ttsGain }}x</span>
               </div>
               <input type="range" v-model.number="settings.ttsGain" min="0" max="20" class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-yellow-500" />
-            </div>
-            <!-- 背景音乐 -->
-            <div class="bg-white border rounded-lg p-2 cursor-help" title="讲故事时播放轻柔的背景音乐">
-              <div class="flex justify-between items-center mb-2">
-                <span class="text-sm text-gray-600">故事背景音乐</span>
-                <label class="relative inline-flex items-center cursor-pointer">
-                  <input type="checkbox" v-model="settings.bgmEnabled" class="sr-only peer" />
-                  <div class="w-9 h-5 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-yellow-500"></div>
-                </label>
-              </div>
-              <div v-if="settings.bgmEnabled" class="flex items-center gap-2">
-                <span class="text-xs text-gray-500">音量</span>
-                <input type="range" v-model.number="settings.bgmVolume" min="0" max="1" step="0.1" class="flex-1 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-yellow-500" />
-                <span class="text-xs text-gray-500 w-8">{{ Math.round(settings.bgmVolume * 100) }}%</span>
-              </div>
             </div>
           </div>
 
@@ -986,8 +1235,21 @@ onUnmounted(() => {
 
       <!-- 工具栏 -->
       <div class="bg-gray-50 md:border-l border-b border-gray-200 px-4 py-2 flex items-center justify-between">
-        <span class="text-sm text-gray-500">共 {{ stories.length }} 个{{ currentSkillId === 'poetry' ? '古诗' : '故事' }}</span>
+        <span class="text-sm text-gray-500">
+          共 {{ currentSkillId === 'songs' ? songsList.length : stories.length }} {{ currentConfig.unit }}
+        </span>
         <button
+          v-if="currentSkillId === 'songs'"
+          @click="showSongUploader = true"
+          class="flex items-center gap-1 px-3 py-1.5 bg-pink-500 hover:bg-pink-600 text-white text-sm rounded-lg transition-colors"
+        >
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+          </svg>
+          上传
+        </button>
+        <button
+          v-else
           @click="openCreate"
           class="flex items-center gap-1 px-3 py-1.5 bg-pink-500 hover:bg-pink-600 text-white text-sm rounded-lg transition-colors"
         >
@@ -998,60 +1260,181 @@ onUnmounted(() => {
         </button>
       </div>
 
-      <!-- 故事列表 -->
+      <!-- 内容列表 -->
       <div class="flex-1 overflow-y-auto bg-gray-50 md:border-l border-gray-200">
         <!-- 加载状态 -->
         <div v-if="isLoading" class="flex justify-center py-12">
           <div class="w-8 h-8 border-4 border-pink-200 border-t-pink-500 rounded-full animate-spin"></div>
         </div>
 
-        <!-- 故事列表 -->
-        <div v-else-if="stories.length > 0" class="p-3 space-y-2">
-          <div
-            v-for="story in stories"
-            :key="story.id"
-            class="bg-white rounded-lg border p-3 flex items-center justify-between hover:shadow-sm transition-shadow"
-          >
-            <div class="flex items-center gap-2 min-w-0">
-              <span class="text-lg flex-shrink-0">{{ currentSkillId === 'poetry' ? '📜' : '📖' }}</span>
-              <span class="text-sm font-medium text-gray-800 truncate">{{ story.title }}</span>
-            </div>
-            <div class="flex items-center gap-1 flex-shrink-0">
-              <button
-                @click="openEdit(story)"
-                class="p-1.5 hover:bg-gray-100 rounded transition-colors"
-                title="编辑"
-              >
-                <svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                </svg>
-              </button>
-              <button
-                @click="handleDelete(story)"
-                class="p-1.5 hover:bg-red-50 rounded transition-colors"
-                title="删除"
-              >
-                <svg class="w-4 h-4 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                </svg>
-              </button>
+        <!-- 儿歌列表（独立显示） -->
+        <template v-else-if="currentSkillId === 'songs'">
+          <!-- 上传表单 -->
+          <div v-if="showSongUploader" class="p-3 bg-yellow-50 border-b">
+            <div class="space-y-3">
+              <div>
+                <label class="block text-xs text-gray-500 mb-1">选择音频文件 *</label>
+                <input
+                  type="file"
+                  accept=".mp3,.wav,.ogg,.m4a"
+                  @change="handleSongFileSelect"
+                  class="w-full text-sm text-gray-500 file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-pink-100 file:text-pink-700 hover:file:bg-pink-200"
+                />
+              </div>
+              <div class="grid grid-cols-2 gap-2">
+                <div>
+                  <label class="block text-xs text-gray-500 mb-1">歌曲名称 *</label>
+                  <input
+                    v-model="newSongTitle"
+                    type="text"
+                    placeholder="如：小星星"
+                    class="w-full px-2 py-1.5 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-pink-500"
+                  />
+                </div>
+                <div>
+                  <label class="block text-xs text-gray-500 mb-1">英文名（可选）</label>
+                  <input
+                    v-model="newSongTitleEn"
+                    type="text"
+                    placeholder="如：Twinkle Star"
+                    class="w-full px-2 py-1.5 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-pink-500"
+                  />
+                </div>
+              </div>
+              <div>
+                <label class="block text-xs text-gray-500 mb-1">关键词（逗号分隔，可选）</label>
+                <input
+                  v-model="newSongKeywords"
+                  type="text"
+                  placeholder="如：星星, 夜晚, twinkle"
+                  class="w-full px-2 py-1.5 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-pink-500"
+                />
+              </div>
+              <div class="flex justify-end gap-2">
+                <button
+                  @click="cancelSongUpload"
+                  class="px-3 py-1.5 text-gray-600 hover:bg-gray-100 rounded-lg text-sm"
+                >
+                  取消
+                </button>
+                <button
+                  @click="handleUploadSong"
+                  :disabled="isUploadingSong || !newSongFile || !newSongTitle.trim()"
+                  class="px-3 py-1.5 bg-pink-500 hover:bg-pink-600 disabled:bg-gray-300 text-white rounded-lg text-sm flex items-center gap-1"
+                >
+                  <svg v-if="isUploadingSong" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  {{ isUploadingSong ? '上传中...' : '上传' }}
+                </button>
+              </div>
             </div>
           </div>
-        </div>
 
-        <!-- 空状态 -->
-        <div v-else class="text-center py-12 px-4">
-          <div class="w-12 h-12 mx-auto mb-3 rounded-full bg-gray-100 flex items-center justify-center">
-            <span class="text-2xl">📚</span>
+          <div v-if="songsList.length > 0" class="p-3 space-y-2">
+            <div
+              v-for="song in songsList"
+              :key="song.id"
+              class="bg-white rounded-lg border p-3 flex items-center justify-between hover:shadow-sm transition-shadow"
+            >
+              <div class="flex items-center gap-2 min-w-0">
+                <span class="text-lg flex-shrink-0">🎵</span>
+                <div class="min-w-0">
+                  <span class="text-sm font-medium text-gray-800 block truncate">{{ song.title }}</span>
+                  <span class="text-xs text-gray-400">{{ song.title_en }}</span>
+                </div>
+              </div>
+              <div class="flex items-center gap-1 flex-shrink-0">
+                <button
+                  @click="previewSong(song)"
+                  class="p-1.5 hover:bg-pink-50 rounded transition-colors"
+                  :title="playingSongId === song.id ? '停止' : '试听'"
+                >
+                  <svg v-if="playingSongId === song.id" class="w-4 h-4 text-pink-500" fill="currentColor" viewBox="0 0 24 24">
+                    <rect x="6" y="6" width="12" height="12" rx="2" />
+                  </svg>
+                  <svg v-else class="w-4 h-4 text-pink-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                </button>
+                <button
+                  @click="handleDeleteSong(song)"
+                  class="p-1.5 hover:bg-red-50 rounded transition-colors"
+                  title="删除"
+                >
+                  <svg class="w-4 h-4 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                  </svg>
+                </button>
+              </div>
+            </div>
           </div>
-          <p class="text-gray-500 text-sm mb-3">还没有故事</p>
-          <button
-            @click="openCreate"
-            class="text-pink-500 hover:text-pink-600 text-sm font-medium"
-          >
-            添加第一个故事
-          </button>
-        </div>
+          <!-- 空状态 -->
+          <div v-else-if="!showSongUploader" class="text-center py-12 px-4">
+            <div class="w-12 h-12 mx-auto mb-3 rounded-full bg-gray-100 flex items-center justify-center">
+              <span class="text-2xl">🎵</span>
+            </div>
+            <p class="text-gray-500 text-sm mb-3">还没有儿歌</p>
+            <button
+              @click="showSongUploader = true"
+              class="text-pink-500 hover:text-pink-600 text-sm font-medium"
+            >
+              上传第一首儿歌
+            </button>
+          </div>
+        </template>
+
+        <!-- 故事/古诗/英语列表 -->
+        <template v-else>
+          <div v-if="stories.length > 0" class="p-3 space-y-2">
+            <div
+              v-for="story in stories"
+              :key="story.id"
+              class="bg-white rounded-lg border p-3 flex items-center justify-between hover:shadow-sm transition-shadow"
+            >
+              <div class="flex items-center gap-2 min-w-0">
+                <span class="text-lg flex-shrink-0">{{ currentConfig.icon }}</span>
+                <span class="text-sm font-medium text-gray-800 truncate">{{ story.title }}</span>
+              </div>
+              <div class="flex items-center gap-1 flex-shrink-0">
+                <button
+                  @click="openEdit(story)"
+                  class="p-1.5 hover:bg-gray-100 rounded transition-colors"
+                  title="编辑"
+                >
+                  <svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                  </svg>
+                </button>
+                <button
+                  @click="handleDelete(story)"
+                  class="p-1.5 hover:bg-red-50 rounded transition-colors"
+                  title="删除"
+                >
+                  <svg class="w-4 h-4 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 空状态 -->
+          <div v-else class="text-center py-12 px-4">
+            <div class="w-12 h-12 mx-auto mb-3 rounded-full bg-gray-100 flex items-center justify-center">
+              <span class="text-2xl">{{ currentConfig.icon }}</span>
+            </div>
+            <p class="text-gray-500 text-sm mb-3">还没有{{ currentConfig.label }}</p>
+            <button
+              @click="openCreate"
+              class="text-pink-500 hover:text-pink-600 text-sm font-medium"
+            >
+              添加第一{{ currentConfig.unit }}
+            </button>
+          </div>
+        </template>
       </div>
     </template>
 
@@ -1061,14 +1444,14 @@ onUnmounted(() => {
         <div
           v-if="showEditor"
           class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
-          @click.self="showEditor = false; stopPreviewBGM()"
+          @click.self="showEditor = false"
         >
           <div class="bg-white rounded-xl w-full max-w-2xl max-h-[90vh] flex flex-col">
             <div class="flex items-center justify-between p-4 border-b">
               <h2 class="text-lg font-semibold">
-                {{ editingStory ? '编辑' : '添加' }}{{ currentSkillId === 'poetry' ? '古诗' : '故事' }}
+                {{ editingStory ? '编辑' : '添加' }}{{ currentConfig.label }}
               </h2>
-              <button @click="showEditor = false; stopPreviewBGM()" class="p-2 hover:bg-gray-100 rounded-lg">
+              <button @click="showEditor = false" class="p-2 hover:bg-gray-100 rounded-lg">
                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
                 </svg>
@@ -1082,7 +1465,7 @@ onUnmounted(() => {
                   <input
                     v-model="form.title"
                     type="text"
-                    :placeholder="currentSkillId === 'poetry' ? '输入诗词名称，如：静夜思' : '输入故事名称，如：白雪公主'"
+                    :placeholder="currentConfig.placeholder.title"
                     class="flex-1 px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
                     :disabled="isGenerating"
                   />
@@ -1107,77 +1490,18 @@ onUnmounted(() => {
                 <label class="block text-sm font-medium text-gray-700 mb-1">内容</label>
                 <textarea
                   v-model="form.content"
-                  :placeholder="currentSkillId === 'poetry' ? '作者\n\n诗句第一行\n\n诗句第二行\n\n---\n\n**讲给宝宝听**\n\n简单的解释' : '故事内容（支持 Markdown 格式）'"
-                  :rows="currentSkillId === 'poetry' ? 10 : 12"
+                  :placeholder="currentConfig.placeholder.content"
+                  :rows="currentSkillId === 'storytelling' ? 12 : 10"
                   class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500 resize-none font-mono text-sm"
                   :disabled="isGenerating"
                 ></textarea>
-                <p v-if="currentSkillId === 'poetry'" class="text-xs text-gray-400 mt-1">格式：作者 → 诗句 → 分隔线(---) → 讲给宝宝听</p>
+                <p v-if="currentConfig.hint" class="text-xs text-gray-400 mt-1">{{ currentConfig.hint }}</p>
               </div>
 
-              <!-- 背景音乐选择 -->
-              <div>
-                <label class="block text-sm font-medium text-gray-700 mb-1">背景音乐</label>
-                <div class="flex gap-2">
-                  <select
-                    v-model="form.bgm"
-                    class="flex-1 px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
-                    :disabled="isLoadingBGM"
-                  >
-                    <option value="">随机播放</option>
-                    <optgroup label="预设音乐">
-                      <option v-for="bgm in bgmList.filter(b => b.preset)" :key="bgm.id" :value="bgm.id">
-                        {{ bgm.name }}
-                      </option>
-                    </optgroup>
-                    <optgroup v-if="bgmList.filter(b => !b.preset).length > 0" label="自定义音乐">
-                      <option v-for="bgm in bgmList.filter(b => !b.preset)" :key="bgm.id" :value="bgm.id">
-                        {{ bgm.name }}
-                      </option>
-                    </optgroup>
-                  </select>
-                  <!-- 试听/暂停按钮 -->
-                  <button
-                    v-if="form.bgm"
-                    @click="previewBGM(form.bgm!)"
-                    type="button"
-                    :class="[
-                      'px-3 py-2 rounded-lg transition-colors',
-                      isPreviewPlaying ? 'bg-pink-100 hover:bg-pink-200' : 'bg-gray-100 hover:bg-gray-200'
-                    ]"
-                    :title="isPreviewPlaying ? '暂停' : '试听'"
-                  >
-                    <!-- 暂停图标 -->
-                    <svg v-if="isPreviewPlaying" class="w-5 h-5 text-pink-600" fill="currentColor" viewBox="0 0 24 24">
-                      <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z" />
-                    </svg>
-                    <!-- 播放图标 -->
-                    <svg v-else class="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
-                  </button>
-                  <!-- 上传按钮 -->
-                  <label class="px-3 py-2 bg-pink-100 hover:bg-pink-200 text-pink-600 rounded-lg transition-colors cursor-pointer flex items-center gap-1">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-                    </svg>
-                    <span class="text-sm">{{ isUploadingBGM ? '上传中...' : '上传' }}</span>
-                    <input
-                      type="file"
-                      accept=".mp3,.wav,.ogg,.m4a"
-                      class="hidden"
-                      :disabled="isUploadingBGM"
-                      @change="handleUploadBGM"
-                    />
-                  </label>
-                </div>
-                <p class="text-xs text-gray-400 mt-1">选择讲这个故事时播放的背景音乐，不选则随机播放</p>
-              </div>
             </div>
 
             <div class="flex justify-end gap-3 p-4 border-t">
-              <button @click="showEditor = false; stopPreviewBGM()" class="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg">
+              <button @click="showEditor = false" class="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg">
                 取消
               </button>
               <button @click="handleSave" class="px-4 py-2 bg-pink-500 hover:bg-pink-600 text-white rounded-lg">

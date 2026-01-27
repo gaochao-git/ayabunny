@@ -34,22 +34,24 @@ release_web() {
 
 # 发布后端
 release_server() {
-    log "提交代码..."
+    log "上传后端到服务器..."
     cd "$SCRIPT_DIR"
 
-    # 检查是否有未提交的更改
-    if [[ -n $(git status -s) ]]; then
-        git add -A
-        git commit -m "release: 更新代码
+    # 使用 rsync 上传，排除不需要的文件
+    rsync -avz --delete \
+        --exclude '__pycache__' \
+        --exclude '*.pyc' \
+        --exclude '.env' \
+        --exclude 'venv' \
+        --exclude '.git' \
+        --exclude 'data' \
+        --exclude 'logs' \
+        server/ "$SERVER_HOST:$SERVER_DIR/server/"
 
-Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"
-    fi
-
-    log "推送到远程仓库..."
-    git push
-
-    log "服务器拉取代码..."
-    ssh "$SERVER_HOST" "cd $SERVER_DIR && git pull"
+    # 同步 skills 目录
+    rsync -avz --delete \
+        --exclude '__pycache__' \
+        server/skills/ "$SERVER_HOST:$SERVER_DIR/server/skills/"
 
     log "重启服务..."
     ssh "$SERVER_HOST" "cd $SERVER_DIR && ./manage.sh restart"
@@ -62,7 +64,7 @@ show_help() {
     echo "用法: $0 [web|server|all]"
     echo ""
     echo "  web     发布前端 (构建并上传 dist)"
-    echo "  server  发布后端 (git push + 服务器 pull + 重启)"
+    echo "  server  发布后端 (上传代码 + 重启服务)"
     echo "  all     发布前端和后端"
     echo ""
     echo "示例:"

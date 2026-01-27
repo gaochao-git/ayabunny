@@ -11,8 +11,13 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from langchain_core.messages import HumanMessage, AIMessage
 from agent import get_agent
-from agent.intent import detect_intent_with_cache, StoryIntent, ListStoriesIntent
+from agent.intent import (
+    detect_intent_with_cache,
+    StoryIntent, ListStoriesIntent,
+    PlaySongIntent, PauseSongIntent, ResumeSongIntent, StopSongIntent, NextSongIntent, ListSongsIntent,
+)
 from agent.tools import tell_story, list_stories
+from agent.tools.songs import play_song, pause_song, resume_song, stop_song, next_song, list_songs as list_songs_tool
 
 router = APIRouter()
 
@@ -130,6 +135,116 @@ async def stream_list_stories_direct() -> AsyncGenerator[str, None]:
     yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
 
+async def stream_play_song_direct(song_name: str | None = None) -> AsyncGenerator[str, None]:
+    """
+    直接播放儿歌（不经过 LLM）
+    """
+    # 调用 play_song 工具
+    result = play_song.invoke({"song_name": song_name or ""})
+    data = json.loads(result)
+
+    # 发送工具调用事件
+    yield f"data: {json.dumps({'type': 'skill_start', 'name': 'play_song', 'input': {'song_name': song_name}}, ensure_ascii=False)}\n\n"
+    yield f"data: {json.dumps({'type': 'skill_end', 'name': 'play_song', 'output': data.get('message', '')[:200]}, ensure_ascii=False)}\n\n"
+
+    # 发送音乐控制事件
+    if data.get("action") == "play" and data.get("song"):
+        yield f"data: {json.dumps({'type': 'music', 'action': 'play', 'song': data['song']}, ensure_ascii=False)}\n\n"
+
+    # 输出消息
+    yield f"data: {json.dumps({'type': 'token', 'content': data.get('message', '')}, ensure_ascii=False)}\n\n"
+
+    # 完成
+    yield f"data: {json.dumps({'type': 'done'})}\n\n"
+
+
+async def stream_pause_song_direct() -> AsyncGenerator[str, None]:
+    """
+    暂停儿歌播放
+    """
+    result = pause_song.invoke({})
+    data = json.loads(result)
+
+    # 发送音乐控制事件
+    yield f"data: {json.dumps({'type': 'music', 'action': 'pause'}, ensure_ascii=False)}\n\n"
+
+    # 输出消息
+    yield f"data: {json.dumps({'type': 'token', 'content': data.get('message', '')}, ensure_ascii=False)}\n\n"
+
+    # 完成
+    yield f"data: {json.dumps({'type': 'done'})}\n\n"
+
+
+async def stream_resume_song_direct() -> AsyncGenerator[str, None]:
+    """
+    继续播放儿歌
+    """
+    result = resume_song.invoke({})
+    data = json.loads(result)
+
+    # 发送音乐控制事件
+    yield f"data: {json.dumps({'type': 'music', 'action': 'resume'}, ensure_ascii=False)}\n\n"
+
+    # 输出消息
+    yield f"data: {json.dumps({'type': 'token', 'content': data.get('message', '')}, ensure_ascii=False)}\n\n"
+
+    # 完成
+    yield f"data: {json.dumps({'type': 'done'})}\n\n"
+
+
+async def stream_stop_song_direct() -> AsyncGenerator[str, None]:
+    """
+    停止播放儿歌
+    """
+    result = stop_song.invoke({})
+    data = json.loads(result)
+
+    # 发送音乐控制事件
+    yield f"data: {json.dumps({'type': 'music', 'action': 'stop'}, ensure_ascii=False)}\n\n"
+
+    # 输出消息
+    yield f"data: {json.dumps({'type': 'token', 'content': data.get('message', '')}, ensure_ascii=False)}\n\n"
+
+    # 完成
+    yield f"data: {json.dumps({'type': 'done'})}\n\n"
+
+
+async def stream_next_song_direct() -> AsyncGenerator[str, None]:
+    """
+    播放下一首儿歌
+    """
+    result = next_song.invoke({})
+    data = json.loads(result)
+
+    # 发送音乐控制事件
+    if data.get("action") == "next" and data.get("song"):
+        yield f"data: {json.dumps({'type': 'music', 'action': 'next', 'song': data['song']}, ensure_ascii=False)}\n\n"
+
+    # 输出消息
+    yield f"data: {json.dumps({'type': 'token', 'content': data.get('message', '')}, ensure_ascii=False)}\n\n"
+
+    # 完成
+    yield f"data: {json.dumps({'type': 'done'})}\n\n"
+
+
+async def stream_list_songs_direct() -> AsyncGenerator[str, None]:
+    """
+    直接返回儿歌列表（不经过 LLM）
+    """
+    # 调用 list_songs 工具
+    songs_content = list_songs_tool.invoke({})
+
+    # 发送工具调用事件
+    yield f"data: {json.dumps({'type': 'skill_start', 'name': 'list_songs', 'input': {}}, ensure_ascii=False)}\n\n"
+    yield f"data: {json.dumps({'type': 'skill_end', 'name': 'list_songs', 'output': songs_content[:200]}, ensure_ascii=False)}\n\n"
+
+    # 输出内容
+    yield f"data: {json.dumps({'type': 'token', 'content': songs_content}, ensure_ascii=False)}\n\n"
+
+    # 完成
+    yield f"data: {json.dumps({'type': 'done'})}\n\n"
+
+
 async def stream_agent_response(
     message: str,
     history: list[ChatMessage],
@@ -145,6 +260,7 @@ async def stream_agent_response(
     - token: 文本 token
     - skill_start: 技能开始调用
     - skill_end: 技能调用完成
+    - music: 音乐控制事件
     - done: 响应完成
     - error: 发生错误
     """
@@ -181,6 +297,19 @@ async def stream_agent_response(
                 tool_name = event.get("name", "unknown")
                 tool_output = event_data.get("output", "")
                 yield f"data: {json.dumps({'type': 'skill_end', 'name': tool_name, 'output': str(tool_output)[:200]}, ensure_ascii=False)}\n\n"
+
+                # 如果是音乐工具，解析输出并发送音乐控制事件
+                if tool_name in ["play_song", "pause_song", "resume_song", "stop_song", "next_song"]:
+                    try:
+                        music_data = json.loads(tool_output)
+                        action = music_data.get("action")
+                        if action and action != "none":
+                            music_event = {"type": "music", "action": action}
+                            if music_data.get("song"):
+                                music_event["song"] = music_data["song"]
+                            yield f"data: {json.dumps(music_event, ensure_ascii=False)}\n\n"
+                    except (json.JSONDecodeError, TypeError):
+                        pass
 
         # 发送完成事件
         yield f"data: {json.dumps({'type': 'done'})}\n\n"
@@ -235,6 +364,79 @@ async def chat(request: ChatRequest):
         print("[Chat] 直接返回故事列表")
         return StreamingResponse(
             stream_list_stories_direct(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            }
+        )
+
+    # 儿歌相关意图
+    if isinstance(intent, PlaySongIntent):
+        print(f"[Chat] 播放儿歌: {intent.song_name or '随机'}")
+        return StreamingResponse(
+            stream_play_song_direct(song_name=intent.song_name),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            }
+        )
+
+    if isinstance(intent, PauseSongIntent):
+        print("[Chat] 暂停儿歌")
+        return StreamingResponse(
+            stream_pause_song_direct(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            }
+        )
+
+    if isinstance(intent, ResumeSongIntent):
+        print("[Chat] 继续播放儿歌")
+        return StreamingResponse(
+            stream_resume_song_direct(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            }
+        )
+
+    if isinstance(intent, StopSongIntent):
+        print("[Chat] 停止播放儿歌")
+        return StreamingResponse(
+            stream_stop_song_direct(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            }
+        )
+
+    if isinstance(intent, NextSongIntent):
+        print("[Chat] 下一首儿歌")
+        return StreamingResponse(
+            stream_next_song_direct(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            }
+        )
+
+    if isinstance(intent, ListSongsIntent):
+        print("[Chat] 返回儿歌列表")
+        return StreamingResponse(
+            stream_list_songs_direct(),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",

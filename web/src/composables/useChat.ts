@@ -20,6 +20,16 @@ export interface Message extends ChatMessage {
   toolCalls?: ToolCall[]  // 工具调用记录
 }
 
+// 音乐控制动作
+export interface MusicAction {
+  type: 'play' | 'pause' | 'resume' | 'stop' | 'next'
+  song?: {
+    id: string
+    title: string
+    file: string
+  }
+}
+
 export function useChat() {
   const messages = ref<Message[]>([])
   const isLoading = ref(false)
@@ -27,6 +37,7 @@ export function useChat() {
   const currentBgm = ref<string | null>(null)  // 当前故事的背景音乐
   const streamingContent = ref('')
   const toolCalls = ref<ToolCall[]>([])  // 当前响应的工具调用记录
+  const musicAction = ref<MusicAction | null>(null)  // 音乐控制动作
 
   // 用于取消请求
   let abortController: AbortController | null = null
@@ -220,6 +231,15 @@ export function useChat() {
         }
         console.log(`[Tool] 工具返回: ${event.name}`, event.output?.slice(0, 200))
         break
+      case 'music':
+        // 音乐控制事件
+        const musicEvent = event as any
+        musicAction.value = {
+          type: musicEvent.action || 'play',
+          song: musicEvent.song,
+        }
+        console.log(`[Music] 收到音乐控制:`, musicAction.value)
+        break
       case 'error':
         console.error('Chat error:', event.message)
         break
@@ -234,6 +254,14 @@ export function useChat() {
     streamingContent.value = ''
     currentSkill.value = null
     currentBgm.value = null
+    musicAction.value = null
+  }
+
+  /**
+   * 清除音乐动作（处理后调用）
+   */
+  function clearMusicAction(): void {
+    musicAction.value = null
   }
 
   return {
@@ -243,9 +271,11 @@ export function useChat() {
     currentBgm,  // 当前故事的背景音乐
     streamingContent,
     toolCalls,  // 当前工具调用记录
+    musicAction,  // 音乐控制动作
     send,
     abort,  // 取消当前请求
     clear,
+    clearMusicAction,
     addUserMessage,
     addAssistantMessage,
   }

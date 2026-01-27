@@ -7,6 +7,7 @@ import { useWebRTCVAD } from '@/composables/useWebRTCVAD'
 import { useSileroVAD } from '@/composables/useSileroVAD'
 import { useFunASRVAD } from '@/composables/useFunASRVAD'
 import { useBGM } from '@/composables/useBGM'
+import { useMusicPlayer } from '@/composables/useMusicPlayer'
 import { useSettingsStore, BACKGROUNDS, AVATARS } from '@/stores/settings'
 import { transcribe } from '@/api/asr'
 import ChatArea from '@/components/ChatArea.vue'
@@ -15,15 +16,24 @@ import RightPanel from '@/components/RightPanel.vue'
 const settings = useSettingsStore()
 const chat = useChat()
 
+// 儿歌播放器
+const musicPlayer = useMusicPlayer({
+  volume: 0.8,
+  onSongEnd: () => {
+    console.log('[Music] 歌曲播放结束')
+  },
+})
+
 // 背景音乐播放器
 const bgm = useBGM({
   volume: () => settings.bgmVolume,
   enabled: () => settings.bgmEnabled,
 })
 
-// 页面关闭时停止背景音乐
+// 页面关闭时停止背景音乐和儿歌
 const handleBeforeUnload = () => {
   bgm.stop()
+  musicPlayer.stop()
 }
 
 onMounted(() => {
@@ -32,6 +42,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   bgm.stop()
+  musicPlayer.stop()
   window.removeEventListener('beforeunload', handleBeforeUnload)
 })
 
@@ -202,6 +213,17 @@ const callRecorder = useAudioRecorder({
   },
 })
 
+// 监听录音状态，录音时降低儿歌音量
+watch(() => callRecorder.isRecording.value, (recording) => {
+  if (musicPlayer.isPlaying.value) {
+    if (recording) {
+      musicPlayer.duck()  // 录音开始，降低儿歌音量
+    } else {
+      musicPlayer.unduck()  // 录音停止，恢复儿歌音量
+    }
+  }
+})
+
 // 语音转文字录音器（不自动停止，手动控制）
 const transcribeRecorder = useAudioRecorder({})
 
@@ -234,7 +256,7 @@ ttsPlayer = useTTSPlayer({
   },
 })
 
-// 监听 TTS 播放状态，实现音频闪避（TTS 播放时降低 BGM 音量）
+// 监听 TTS 播放状态，实现音频闪避（TTS 播放时降低 BGM 和儿歌音量）
 watch(() => ttsPlayer.isPlaying.value, (playing) => {
   if (bgm.isPlaying.value) {
     if (playing) {
@@ -243,6 +265,59 @@ watch(() => ttsPlayer.isPlaying.value, (playing) => {
       bgm.unduck()  // TTS 停止播放，恢复 BGM 音量
     }
   }
+  // 儿歌音量闪避
+  if (musicPlayer.isPlaying.value) {
+    if (playing) {
+      musicPlayer.duck()
+    } else {
+      musicPlayer.unduck()
+    }
+  }
+})
+
+// 监听音乐控制动作（来自 LLM）
+watch(() => chat.musicAction.value, async (action) => {
+  if (!action) return
+
+  console.log('[Music] 收到控制动作:', action)
+
+  switch (action.type) {
+    case 'play':
+      if (action.song) {
+        // 播放指定歌曲
+        await musicPlayer.loadSongs()
+        const song = musicPlayer.songs.value.find(s => s.id === action.song!.id)
+        if (song) {
+          musicPlayer.playSong(song.title)
+        } else {
+          // 如果找不到，尝试随机播放
+          musicPlayer.playSong()
+        }
+      } else {
+        musicPlayer.playSong()
+      }
+      break
+    case 'pause':
+      musicPlayer.pause()
+      break
+    case 'resume':
+      musicPlayer.resume()
+      break
+    case 'stop':
+      musicPlayer.stop()
+      break
+    case 'next':
+      if (action.song) {
+        await musicPlayer.loadSongs()
+        musicPlayer.playSong(action.song.title)
+      } else {
+        musicPlayer.next()
+      }
+      break
+  }
+
+  // 清除动作，避免重复处理
+  chat.clearMusicAction()
 })
 
 // 计算属性
@@ -346,8 +421,9 @@ function endCall() {
   ttsPlayer.stop()  // 会清空 TTS 队列
   vad.stop()
 
-  // 停止背景音乐
+  // 停止背景音乐和儿歌
   bgm.stop()
+  musicPlayer.stop()
 }
 
 // 开始通话录音

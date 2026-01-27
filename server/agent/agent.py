@@ -12,7 +12,11 @@ from langchain_openai import ChatOpenAI
 from langchain_core.tools import tool
 from langgraph.prebuilt import create_react_agent
 from config import get_settings
-from .tools import tell_story, list_stories, recite_poem, list_poems
+from .tools import (
+    tell_story, list_stories,
+    recite_poem, list_poems,
+    play_song, pause_song, resume_song, stop_song, next_song, list_songs,
+)
 from .skills_loader import (
     discover_skills,
     get_skills_summary,
@@ -104,12 +108,31 @@ def build_system_prompt(assistant_name: str = "小智") -> str:
 ### 查询古诗列表 → 调用 list_poems
 - "有什么古诗"、"古诗列表"、"会背哪些诗"
 
+### 播放儿歌场景 → 必须调用 play_song
+当用户表达以下意图时，**必须立即调用 play_song 工具**：
+- "唱首儿歌"、"播放儿歌"、"听儿歌"
+- "唱歌"、"放首歌"、"播放歌曲"
+- "播放小星星"、"唱两只老虎"
+
+### 儿歌控制场景
+- 用户说"暂停"、"停一下" → 调用 pause_song()
+- 用户说"继续"、"继续播放" → 调用 resume_song()
+- 用户说"停止"、"不听了" → 调用 stop_song()
+- 用户说"下一首"、"换一首" → 调用 next_song()
+
+### 查询儿歌列表 → 调用 list_songs
+- "有什么儿歌"、"儿歌列表"、"有哪些歌"
+
 ### 示例（必须这样做）
 - 用户说"讲个故事吧" → 立即调用 tell_story()
 - 用户说"我想听三只小猪" → 立即调用 tell_story(story_name="三只小猪")
 - 用户说"背首古诗" → 立即调用 recite_poem()
 - 用户说"背静夜思" → 立即调用 recite_poem(poem_name="静夜思")
 - 用户说"有哪些古诗" → 立即调用 list_poems()
+- 用户说"唱首儿歌" → 立即调用 play_song()
+- 用户说"播放小星星" → 立即调用 play_song(song_name="小星星")
+- 用户说"暂停" → 立即调用 pause_song()
+- 用户说"下一首" → 立即调用 next_song()
 
 ### 其他工具
 - load_skill: 仅当你需要了解某个技能的详细用法时才调用
@@ -167,6 +190,12 @@ def create_agent(
         list_stories,    # 列出故事工具
         recite_poem,     # 朗诵古诗工具
         list_poems,      # 列出古诗工具
+        play_song,       # 播放儿歌工具
+        pause_song,      # 暂停儿歌工具
+        resume_song,     # 继续播放工具
+        stop_song,       # 停止播放工具
+        next_song,       # 下一首工具
+        list_songs,      # 列出儿歌工具
     ]
 
     # 构建系统提示词（包含技能摘要和助手名字）

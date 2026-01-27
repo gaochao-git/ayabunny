@@ -8,12 +8,19 @@ export interface ChatMessage {
 }
 
 export interface ChatEvent {
-  type: 'token' | 'skill_start' | 'skill_end' | 'done' | 'error'
+  type: 'token' | 'skill_start' | 'skill_end' | 'music' | 'done' | 'error'
   content?: string
   name?: string
   input?: Record<string, unknown>
   output?: string
   message?: string
+  // 音乐控制相关
+  action?: 'play' | 'pause' | 'resume' | 'stop' | 'next'
+  song?: {
+    id: string
+    title: string
+    file: string
+  }
 }
 
 export interface ChatOptions {

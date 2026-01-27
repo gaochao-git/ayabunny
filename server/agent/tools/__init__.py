@@ -2,8 +2,10 @@
 
 from .storytelling import tell_story, list_stories
 from .poetry import recite_poem, list_poems
+from .songs import play_song, pause_song, resume_song, stop_song, next_song, list_songs
 
 __all__ = [
     "tell_story", "list_stories",
     "recite_poem", "list_poems",
+    "play_song", "pause_song", "resume_song", "stop_song", "next_song", "list_songs",
 ]
