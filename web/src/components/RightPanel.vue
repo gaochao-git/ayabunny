@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useSettingsStore, ASR_SERVICES, LLM_MODELS, TTS_MODELS, TTS_VOICES, DEFAULT_TTS_VOICES, VAD_TYPES, BACKGROUNDS, AVATARS } from '@/stores/settings'
-import { getStories, createStory, updateStory, deleteStory, generateStory, type Story } from '@/api/skills'
+import { getSkills, getStories, createStory, updateStory, deleteStory, generateStory, type Story, type SkillSummary } from '@/api/skills'
 import { getBGMList, uploadBGM, type BGMItem } from '@/api/bgm'
 import { getCustomVoices, createCustomVoice, deleteCustomVoice, testCustomVoice, getVoiceAudioUrl, type CustomVoice } from '@/api/tts'
 
@@ -267,8 +267,17 @@ function formatTime(seconds: number): string {
   return `${m}:${s.toString().padStart(2, '0')}`
 }
 
-// ========== 故事管理相关 ==========
-const SKILL_ID = 'storytelling'
+// ========== 内容管理相关 ==========
+// 可用技能列表
+const availableSkills = ref<SkillSummary[]>([])
+const currentSkillId = ref('storytelling')
+
+// 技能显示名称映射
+const skillLabels: Record<string, string> = {
+  storytelling: '故事',
+  poetry: '古诗',
+}
+
 const stories = ref<Story[]>([])
 const isLoading = ref(false)
 const showEditor = ref(false)
@@ -364,10 +373,29 @@ function stopPreviewBGM() {
   isPreviewPlaying.value = false
 }
 
+// 加载可用技能列表
+async function loadSkills() {
+  try {
+    const skills = await getSkills()
+    // 只保留有 contentDir 的技能（可管理内容的技能）
+    availableSkills.value = skills.filter(s =>
+      s.id === 'storytelling' || s.id === 'poetry'
+    )
+  } catch (error) {
+    console.error('Failed to load skills:', error)
+  }
+}
+
+// 切换技能
+function switchSkill(skillId: string) {
+  currentSkillId.value = skillId
+  loadStories()
+}
+
 async function loadStories() {
   isLoading.value = true
   try {
-    stories.value = await getStories(SKILL_ID)
+    stories.value = await getStories(currentSkillId.value)
   } catch (error) {
     console.error('Failed to load stories:', error)
   } finally {
@@ -385,7 +413,7 @@ function openCreate() {
 async function openEdit(story: Story) {
   editingStory.value = story
   loadBGMList()  // 加载 BGM 列表
-  const fullStory = await import('@/api/skills').then(m => m.getStory(SKILL_ID, story.id))
+  const fullStory = await import('@/api/skills').then(m => m.getStory(currentSkillId.value, story.id))
   form.value = {
     title: fullStory.title,
     content: fullStory.content?.replace(/^#\s+.+\n\n/, '') || '',
@@ -402,13 +430,13 @@ async function handleSave() {
 
   try {
     if (editingStory.value) {
-      await updateStory(SKILL_ID, editingStory.value.id, {
+      await updateStory(currentSkillId.value, editingStory.value.id, {
         title: form.value.title,
         content: form.value.content,
         bgm: form.value.bgm || null,
       })
     } else {
-      await createStory(SKILL_ID, {
+      await createStory(currentSkillId.value, {
         title: form.value.title,
         content: form.value.content,
         bgm: form.value.bgm || null,
@@ -427,7 +455,7 @@ async function handleSave() {
 async function handleDelete(story: Story) {
   if (!confirm(`确定要删除「${story.title}」吗？`)) return
   try {
-    await deleteStory(SKILL_ID, story.id)
+    await deleteStory(currentSkillId.value, story.id)
     await loadStories()
   } catch (error: any) {
     console.error('Failed to delete story:', error)
@@ -438,12 +466,12 @@ async function handleDelete(story: Story) {
 
 async function handleGenerate() {
   if (!form.value.title.trim()) {
-    alert('请先输入故事名称')
+    alert('请先输入标题')
     return
   }
   isGenerating.value = true
   try {
-    const result = await generateStory(SKILL_ID, form.value.title.trim())
+    const result = await generateStory(currentSkillId.value, form.value.title.trim())
     form.value.content = result.content
   } catch (error: any) {
     console.error('Failed to generate story:', error)
@@ -465,6 +493,8 @@ function switchTab(tab: TabType) {
 onMounted(() => {
   // 加载自定义音色
   loadCustomVoices()
+  // 加载可用技能
+  loadSkills()
 
   if (activeTab.value === 'stories') {
     loadStories()
@@ -534,7 +564,7 @@ onUnmounted(() => {
             : 'text-gray-500 hover:text-gray-700 hover:bg-white/50'
         ]"
       >
-        故事管理
+        内容管理
       </button>
     </div>
 
@@ -934,11 +964,29 @@ onUnmounted(() => {
       </div>
     </template>
 
-    <!-- 故事管理面板 -->
+    <!-- 内容管理面板 -->
     <template v-else-if="activeTab === 'stories'">
+      <!-- 技能 Tab 切换 -->
+      <div class="bg-white md:border-l border-b border-gray-200 px-4 py-2 flex gap-4">
+        <button
+          v-for="skill in availableSkills"
+          :key="skill.id"
+          @click="switchSkill(skill.id)"
+          :class="[
+            'text-sm font-medium transition-colors pb-1 border-b-2 flex items-center gap-1',
+            currentSkillId === skill.id
+              ? 'text-pink-500 border-pink-500'
+              : 'text-gray-400 border-transparent hover:text-gray-600'
+          ]"
+        >
+          <span>{{ skill.icon }}</span>
+          <span>{{ skillLabels[skill.id] || skill.name }}</span>
+        </button>
+      </div>
+
       <!-- 工具栏 -->
       <div class="bg-gray-50 md:border-l border-b border-gray-200 px-4 py-2 flex items-center justify-between">
-        <span class="text-sm text-gray-500">共 {{ stories.length }} 个故事</span>
+        <span class="text-sm text-gray-500">共 {{ stories.length }} 个{{ currentSkillId === 'poetry' ? '古诗' : '故事' }}</span>
         <button
           @click="openCreate"
           class="flex items-center gap-1 px-3 py-1.5 bg-pink-500 hover:bg-pink-600 text-white text-sm rounded-lg transition-colors"
@@ -965,7 +1013,7 @@ onUnmounted(() => {
             class="bg-white rounded-lg border p-3 flex items-center justify-between hover:shadow-sm transition-shadow"
           >
             <div class="flex items-center gap-2 min-w-0">
-              <span class="text-lg flex-shrink-0">📖</span>
+              <span class="text-lg flex-shrink-0">{{ currentSkillId === 'poetry' ? '📜' : '📖' }}</span>
               <span class="text-sm font-medium text-gray-800 truncate">{{ story.title }}</span>
             </div>
             <div class="flex items-center gap-1 flex-shrink-0">
@@ -1018,7 +1066,7 @@ onUnmounted(() => {
           <div class="bg-white rounded-xl w-full max-w-2xl max-h-[90vh] flex flex-col">
             <div class="flex items-center justify-between p-4 border-b">
               <h2 class="text-lg font-semibold">
-                {{ editingStory ? '编辑故事' : '添加故事' }}
+                {{ editingStory ? '编辑' : '添加' }}{{ currentSkillId === 'poetry' ? '古诗' : '故事' }}
               </h2>
               <button @click="showEditor = false; stopPreviewBGM()" class="p-2 hover:bg-gray-100 rounded-lg">
                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1034,7 +1082,7 @@ onUnmounted(() => {
                   <input
                     v-model="form.title"
                     type="text"
-                    placeholder="输入故事名称，如：白雪公主"
+                    :placeholder="currentSkillId === 'poetry' ? '输入诗词名称，如：静夜思' : '输入故事名称，如：白雪公主'"
                     class="flex-1 px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
                     :disabled="isGenerating"
                   />
@@ -1051,14 +1099,14 @@ onUnmounted(() => {
                     <span>{{ isGenerating ? '生成中...' : '自动获取' }}</span>
                   </button>
                 </div>
-                <p v-if="!editingStory" class="text-xs text-gray-400 mt-1">输入故事名称后点击"自动获取"，AI 会自动生成故事内容</p>
+                <p v-if="!editingStory" class="text-xs text-gray-400 mt-1">输入名称后点击"自动获取"，AI 会自动生成内容</p>
               </div>
 
               <div>
                 <label class="block text-sm font-medium text-gray-700 mb-1">内容</label>
                 <textarea
                   v-model="form.content"
-                  placeholder="故事内容（支持 Markdown 格式）"
+                  :placeholder="currentSkillId === 'poetry' ? '诗词内容（支持 Markdown 格式）' : '故事内容（支持 Markdown 格式）'"
                   rows="12"
                   class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500 resize-none font-mono text-sm"
                   :disabled="isGenerating"

@@ -12,7 +12,7 @@ from langchain_openai import ChatOpenAI
 from langchain_core.tools import tool
 from langgraph.prebuilt import create_react_agent
 from config import get_settings
-from .tools import tell_story, list_stories
+from .tools import tell_story, list_stories, recite_poem, list_poems
 from .skills_loader import (
     discover_skills,
     get_skills_summary,
@@ -84,25 +84,32 @@ def build_system_prompt(assistant_name: str = "小智") -> str:
 
 ## 工具使用规则（极其重要！必须遵守！）
 
-**禁止自己编写故事！你必须调用 tell_story 工具从故事库读取故事内容！**
+**禁止自己编写故事或古诗！必须调用相应工具从库中读取内容！**
 
 ### 讲故事场景 → 必须调用 tell_story
-当用户表达以下意图时，**必须立即调用 tell_story 工具**，绝对不能自己编故事：
+当用户表达以下意图时，**必须立即调用 tell_story 工具**：
 - "讲个故事"、"讲故事"、"想听故事"
 - "睡前故事"、"童话故事"
 - "讲XX的故事"（如"讲小红帽的故事"）
-- 用户选择了某个故事
-
-**重要**：你没有讲故事的能力！只有 tell_story 工具能提供故事内容！
 
 ### 查询故事列表 → 调用 list_stories
 - "有什么故事"、"故事列表"、"有哪些故事"
 
+### 朗诵古诗场景 → 必须调用 recite_poem
+当用户表达以下意图时，**必须立即调用 recite_poem 工具**：
+- "背首古诗"、"念首诗"、"朗诵古诗"
+- "唐诗"、"宋词"、"古诗词"
+- "背XX"（如"背静夜思"）
+
+### 查询古诗列表 → 调用 list_poems
+- "有什么古诗"、"古诗列表"、"会背哪些诗"
+
 ### 示例（必须这样做）
-- 用户说"讲个故事吧" → 立即调用 tell_story()，不要自己编
+- 用户说"讲个故事吧" → 立即调用 tell_story()
 - 用户说"我想听三只小猪" → 立即调用 tell_story(story_name="三只小猪")
-- 用户说"讲小红帽" → 立即调用 tell_story(story_name="小红帽")
-- 用户说"有哪些故事" → 立即调用 list_stories()
+- 用户说"背首古诗" → 立即调用 recite_poem()
+- 用户说"背静夜思" → 立即调用 recite_poem(poem_name="静夜思")
+- 用户说"有哪些古诗" → 立即调用 list_poems()
 
 ### 其他工具
 - load_skill: 仅当你需要了解某个技能的详细用法时才调用
@@ -158,6 +165,8 @@ def create_agent(
         load_skill,      # 技能加载工具
         tell_story,      # 讲故事工具
         list_stories,    # 列出故事工具
+        recite_poem,     # 朗诵古诗工具
+        list_poems,      # 列出古诗工具
     ]
 
     # 构建系统提示词（包含技能摘要和助手名字）

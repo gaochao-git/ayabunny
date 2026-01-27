@@ -1,0 +1,10 @@
+{
+  "id": "poetry",
+  "name": "古诗词",
+  "description": "朗诵和学习经典古诗词",
+  "icon": "📜",
+  "version": "1.0.0",
+  "tools": ["recite_poem", "list_poems"],
+  "contentDir": "poems",
+  "contentType": "poem"
+}
