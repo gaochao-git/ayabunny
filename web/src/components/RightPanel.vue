@@ -2,6 +2,7 @@
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useSettingsStore, ASR_SERVICES, LLM_MODELS, TTS_MODELS, TTS_VOICES, DEFAULT_TTS_VOICES, VAD_TYPES, BACKGROUNDS, AVATARS } from '@/stores/settings'
 import { getStories, createStory, updateStory, deleteStory, generateStory, type Story } from '@/api/skills'
+import { getBGMList, uploadBGM, type BGMItem } from '@/api/bgm'
 import { getCustomVoices, createCustomVoice, deleteCustomVoice, testCustomVoice, getVoiceAudioUrl, type CustomVoice } from '@/api/tts'
 
 const settings = useSettingsStore()
@@ -274,10 +275,57 @@ const showEditor = ref(false)
 const editingStory = ref<Story | null>(null)
 const isGenerating = ref(false)
 
+// BGM 列表
+const bgmList = ref<BGMItem[]>([])
+const isLoadingBGM = ref(false)
+const isUploadingBGM = ref(false)
+
 const form = ref({
   title: '',
   content: '',
+  bgm: '' as string | null,  // BGM 文件名
 })
+
+// 加载 BGM 列表
+async function loadBGMList() {
+  if (bgmList.value.length > 0) return  // 已加载过
+  isLoadingBGM.value = true
+  try {
+    bgmList.value = await getBGMList()
+  } catch (error) {
+    console.error('Failed to load BGM list:', error)
+  } finally {
+    isLoadingBGM.value = false
+  }
+}
+
+// 上传自定义 BGM
+async function handleUploadBGM(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+
+  isUploadingBGM.value = true
+  try {
+    const newBGM = await uploadBGM(file)
+    bgmList.value.push(newBGM)
+    form.value.bgm = newBGM.id  // 自动选中新上传的
+  } catch (error: any) {
+    console.error('Failed to upload BGM:', error)
+    alert('上传失败: ' + (error.message || '未知错误'))
+  } finally {
+    isUploadingBGM.value = false
+    input.value = ''  // 重置文件选择
+  }
+}
+
+// 试听 BGM
+function previewBGM(bgmId: string) {
+  if (!bgmId) return
+  const audio = new Audio(`/bgm/${bgmId}`)
+  audio.volume = 0.5
+  audio.play().catch(e => console.warn('播放失败:', e))
+}
 
 async function loadStories() {
   isLoading.value = true
@@ -292,16 +340,19 @@ async function loadStories() {
 
 function openCreate() {
   editingStory.value = null
-  form.value = { title: '', content: '' }
+  form.value = { title: '', content: '', bgm: '' }
+  loadBGMList()  // 加载 BGM 列表
   showEditor.value = true
 }
 
 async function openEdit(story: Story) {
   editingStory.value = story
+  loadBGMList()  // 加载 BGM 列表
   const fullStory = await import('@/api/skills').then(m => m.getStory(SKILL_ID, story.id))
   form.value = {
     title: fullStory.title,
     content: fullStory.content?.replace(/^#\s+.+\n\n/, '') || '',
+    bgm: fullStory.bgm || '',
   }
   showEditor.value = true
 }
@@ -317,11 +368,13 @@ async function handleSave() {
       await updateStory(SKILL_ID, editingStory.value.id, {
         title: form.value.title,
         content: form.value.content,
+        bgm: form.value.bgm || null,
       })
     } else {
       await createStory(SKILL_ID, {
         title: form.value.title,
         content: form.value.content,
+        bgm: form.value.bgm || null,
       })
     }
     showEditor.value = false
@@ -687,6 +740,21 @@ onUnmounted(() => {
               </div>
               <input type="range" v-model.number="settings.ttsGain" min="0" max="20" class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-yellow-500" />
             </div>
+            <!-- 背景音乐 -->
+            <div class="bg-white border rounded-lg p-2 cursor-help" title="讲故事时播放轻柔的背景音乐">
+              <div class="flex justify-between items-center mb-2">
+                <span class="text-sm text-gray-600">故事背景音乐</span>
+                <label class="relative inline-flex items-center cursor-pointer">
+                  <input type="checkbox" v-model="settings.bgmEnabled" class="sr-only peer" />
+                  <div class="w-9 h-5 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-yellow-500"></div>
+                </label>
+              </div>
+              <div v-if="settings.bgmEnabled" class="flex items-center gap-2">
+                <span class="text-xs text-gray-500">音量</span>
+                <input type="range" v-model.number="settings.bgmVolume" min="0" max="1" step="0.1" class="flex-1 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-yellow-500" />
+                <span class="text-xs text-gray-500 w-8">{{ Math.round(settings.bgmVolume * 100) }}%</span>
+              </div>
+            </div>
           </div>
 
           <!-- 自定义音色管理 -->
@@ -954,6 +1022,58 @@ onUnmounted(() => {
                   class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500 resize-none font-mono text-sm"
                   :disabled="isGenerating"
                 ></textarea>
+              </div>
+
+              <!-- 背景音乐选择 -->
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">背景音乐</label>
+                <div class="flex gap-2">
+                  <select
+                    v-model="form.bgm"
+                    class="flex-1 px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+                    :disabled="isLoadingBGM"
+                  >
+                    <option value="">随机播放</option>
+                    <optgroup label="预设音乐">
+                      <option v-for="bgm in bgmList.filter(b => b.preset)" :key="bgm.id" :value="bgm.id">
+                        {{ bgm.name }}
+                      </option>
+                    </optgroup>
+                    <optgroup v-if="bgmList.filter(b => !b.preset).length > 0" label="自定义音乐">
+                      <option v-for="bgm in bgmList.filter(b => !b.preset)" :key="bgm.id" :value="bgm.id">
+                        {{ bgm.name }}
+                      </option>
+                    </optgroup>
+                  </select>
+                  <!-- 试听按钮 -->
+                  <button
+                    v-if="form.bgm"
+                    @click="previewBGM(form.bgm!)"
+                    type="button"
+                    class="px-3 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+                    title="试听"
+                  >
+                    <svg class="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                  </button>
+                  <!-- 上传按钮 -->
+                  <label class="px-3 py-2 bg-pink-100 hover:bg-pink-200 text-pink-600 rounded-lg transition-colors cursor-pointer flex items-center gap-1">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                    </svg>
+                    <span class="text-sm">{{ isUploadingBGM ? '上传中...' : '上传' }}</span>
+                    <input
+                      type="file"
+                      accept=".mp3,.wav,.ogg,.m4a"
+                      class="hidden"
+                      :disabled="isUploadingBGM"
+                      @change="handleUploadBGM"
+                    />
+                  </label>
+                </div>
+                <p class="text-xs text-gray-400 mt-1">选择讲这个故事时播放的背景音乐，不选则随机播放</p>
               </div>
             </div>
 

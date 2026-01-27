@@ -56,12 +56,34 @@ async def stream_story_direct(
 
     这样可以避免 LLM 总结或改写故事内容。
     """
+    from agent.tools.storytelling import load_story, get_all_story_ids
+    import random
+
+    # 获取故事及其 BGM 信息
+    story_bgm = None
+    story_ids = get_all_story_ids()
+
+    if story_name and story_ids:
+        # 尝试匹配故事
+        for story_id in story_ids:
+            story_data = load_story(story_id)
+            if story_data:
+                if story_id == story_name or (story_name.lower() in story_data["title"].lower()):
+                    story_bgm = story_data.get("bgm")
+                    break
+    elif story_ids:
+        # 随机选择故事
+        story_id = random.choice(story_ids)
+        story_data = load_story(story_id)
+        if story_data:
+            story_bgm = story_data.get("bgm")
+
     # 直接调用 tell_story 工具获取故事
     # 注意：tell_story 是 @tool 装饰的，需要用 .invoke() 调用
     story_content = tell_story.invoke({"story_name": story_name or ""})
 
-    # 发送工具调用开始事件（用于前端显示）
-    yield f"data: {json.dumps({'type': 'skill_start', 'name': 'tell_story', 'input': {'story_name': story_name}}, ensure_ascii=False)}\n\n"
+    # 发送工具调用开始事件（用于前端显示，包含 bgm 信息）
+    yield f"data: {json.dumps({'type': 'skill_start', 'name': 'tell_story', 'input': {'story_name': story_name}, 'bgm': story_bgm}, ensure_ascii=False)}\n\n"
 
     # 发送工具调用完成事件
     yield f"data: {json.dumps({'type': 'skill_end', 'name': 'tell_story', 'output': story_content[:200]}, ensure_ascii=False)}\n\n"

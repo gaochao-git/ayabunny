@@ -19,6 +19,24 @@ def get_stories_dir() -> str:
     )
 
 
+def parse_frontmatter(content: str) -> tuple[dict, str]:
+    """解析 Markdown frontmatter
+
+    返回: (frontmatter字典, 正文内容)
+    """
+    if content.startswith("---"):
+        parts = content.split("---", 2)
+        if len(parts) >= 3:
+            import yaml
+            try:
+                frontmatter = yaml.safe_load(parts[1]) or {}
+                body = parts[2].strip()
+                return frontmatter, body
+            except:
+                pass
+    return {}, content
+
+
 def load_story(story_id: str) -> dict | None:
     """加载单个故事"""
     stories_dir = get_stories_dir()
@@ -30,10 +48,12 @@ def load_story(story_id: str) -> dict | None:
     with open(file_path, "r", encoding="utf-8") as f:
         content = f.read()
 
-    # 解析 Markdown
-    lines = content.split("\n")
+    # 解析 frontmatter
+    frontmatter, body = parse_frontmatter(content)
+
+    # 解析标题
     title = story_id
-    for line in lines:
+    for line in body.split("\n"):
         if line.startswith("# "):
             title = line[2:].strip()
             break
@@ -41,7 +61,8 @@ def load_story(story_id: str) -> dict | None:
     return {
         "id": story_id,
         "title": title,
-        "content": content
+        "content": body,
+        "bgm": frontmatter.get("bgm"),  # 背景音乐
     }
 
 

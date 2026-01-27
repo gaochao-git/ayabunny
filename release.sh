@@ -24,7 +24,7 @@ warn() {
 release_web() {
     log "构建前端..."
     cd "$SCRIPT_DIR/web"
-    pnpm build
+    npm run build
 
     log "上传前端到服务器..."
     scp -r dist/* "$SERVER_HOST:$SERVER_DIR/web/dist/"

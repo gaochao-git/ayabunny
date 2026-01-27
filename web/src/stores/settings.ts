@@ -127,6 +127,10 @@ export const useSettingsStore = defineStore('settings', () => {
   const assistantName = ref(initial.assistantName ?? '小智')              // 助手名字
   const assistantAliases = ref<string[]>(initial.assistantAliases ?? ['小知', '小志'])  // 同音词/别名
 
+  // ========== 背景音乐 ==========
+  const bgmEnabled = ref(initial.bgmEnabled ?? true)                      // 启用背景音乐
+  const bgmVolume = ref(initial.bgmVolume ?? 0.6)                         // 背景音乐音量 (0-1)
+
   // 保存设置
   function save(): void {
     const settings = {
@@ -158,6 +162,9 @@ export const useSettingsStore = defineStore('settings', () => {
       avatar: avatar.value,
       assistantName: assistantName.value,
       assistantAliases: assistantAliases.value,
+      // BGM
+      bgmEnabled: bgmEnabled.value,
+      bgmVolume: bgmVolume.value,
     }
     localStorage.setItem('voice-chat-settings', JSON.stringify(settings))
   }
@@ -170,6 +177,7 @@ export const useSettingsStore = defineStore('settings', () => {
       ttsEnabled, ttsModel, ttsVoice, ttsCustomVoiceId, ttsSpeed, ttsGain,
       vadEnabled, vadType, vadThreshold, vadTriggerCount, vadIgnoreTime,
       background, avatar, assistantName, assistantAliases,
+      bgmEnabled, bgmVolume,
     ],
     save,
     { deep: true }
@@ -204,6 +212,9 @@ export const useSettingsStore = defineStore('settings', () => {
     avatar,
     assistantName,
     assistantAliases,
+    // BGM
+    bgmEnabled,
+    bgmVolume,
     // Methods
     save,
   }

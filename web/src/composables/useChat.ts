@@ -24,6 +24,7 @@ export function useChat() {
   const messages = ref<Message[]>([])
   const isLoading = ref(false)
   const currentSkill = ref<string | null>(null)
+  const currentBgm = ref<string | null>(null)  // 当前故事的背景音乐
   const streamingContent = ref('')
   const toolCalls = ref<ToolCall[]>([])  // 当前响应的工具调用记录
 
@@ -195,6 +196,8 @@ export function useChat() {
     switch (event.type) {
       case 'skill_start':
         currentSkill.value = event.name || null
+        // 提取 BGM 信息（如果有）
+        currentBgm.value = (event as any).bgm || null
         // 记录工具调用开始
         toolCalls.value.push({
           name: event.name || 'unknown',
@@ -202,10 +205,11 @@ export function useChat() {
           status: 'running',
           timestamp: Date.now(),
         })
-        console.log(`[Tool] 调用工具: ${event.name}`, event.input)
+        console.log(`[Tool] 调用工具: ${event.name}`, event.input, 'bgm:', currentBgm.value)
         break
       case 'skill_end':
         currentSkill.value = null
+        currentBgm.value = null
         // 更新工具调用结果
         const lastCall = toolCalls.value.find(
           t => t.name === event.name && t.status === 'running'
@@ -229,12 +233,14 @@ export function useChat() {
     messages.value = []
     streamingContent.value = ''
     currentSkill.value = null
+    currentBgm.value = null
   }
 
   return {
     messages,
     isLoading,
     currentSkill,
+    currentBgm,  // 当前故事的背景音乐
     streamingContent,
     toolCalls,  // 当前工具调用记录
     send,

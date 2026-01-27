@@ -31,6 +31,7 @@ export interface Story {
   title: string
   content?: string
   filename?: string
+  bgm?: string | null  // 背景音乐文件名
 }
 
 /**
@@ -95,7 +96,7 @@ export async function getStory(skillId: string, storyId: string): Promise<Story>
  */
 export async function createStory(
   skillId: string,
-  story: { title: string; content: string; category?: string }
+  story: { title: string; content: string; category?: string; bgm?: string | null }
 ): Promise<Story> {
   const response = await fetch(`/api/skills/${skillId}/stories`, {
     method: 'POST',
@@ -116,7 +117,7 @@ export async function createStory(
 export async function updateStory(
   skillId: string,
   storyId: string,
-  story: { title?: string; content?: string; category?: string }
+  story: { title?: string; content?: string; category?: string; bgm?: string | null }
 ): Promise<Story> {
   const response = await fetch(`/api/skills/${skillId}/stories/${storyId}`, {
     method: 'PUT',

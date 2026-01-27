@@ -36,6 +36,7 @@ class Story(BaseModel):
     title: str
     content: str
     category: str = "default"
+    bgm: str | None = None  # 背景音乐文件名
 
 
 class StoryCreate(BaseModel):
@@ -43,6 +44,7 @@ class StoryCreate(BaseModel):
     title: str
     content: str
     category: str = "default"
+    bgm: str | None = None  # 背景音乐文件名
 
 
 class StoryUpdate(BaseModel):
@@ -50,6 +52,46 @@ class StoryUpdate(BaseModel):
     title: str | None = None
     content: str | None = None
     category: str | None = None
+    bgm: str | None = None  # 背景音乐文件名
+
+
+def parse_story_frontmatter(content: str) -> tuple[dict, str]:
+    """解析 Markdown frontmatter
+
+    返回: (frontmatter字典, 正文内容)
+    """
+    if content.startswith("---"):
+        parts = content.split("---", 2)
+        if len(parts) >= 3:
+            import yaml
+            try:
+                frontmatter = yaml.safe_load(parts[1]) or {}
+                body = parts[2].strip()
+                return frontmatter, body
+            except:
+                pass
+    return {}, content
+
+
+def build_story_content(title: str, body: str, bgm: str | None = None) -> str:
+    """构建带 frontmatter 的 Markdown 内容"""
+    lines = []
+
+    # 添加 frontmatter（如果有 bgm）
+    if bgm:
+        import yaml
+        frontmatter = {"bgm": bgm}
+        lines.append("---")
+        lines.append(yaml.dump(frontmatter, allow_unicode=True, default_flow_style=False).strip())
+        lines.append("---")
+        lines.append("")
+
+    # 添加标题和正文
+    lines.append(f"# {title}")
+    lines.append("")
+    lines.append(body)
+
+    return "\n".join(lines)
 
 
 class StoryGenerateRequest(BaseModel):
@@ -129,17 +171,22 @@ async def list_stories(skill_id: str):
             file_path = os.path.join(stories_path, filename)
             async with aiofiles.open(file_path, "r", encoding="utf-8") as f:
                 content = await f.read()
-                # 从 Markdown 中提取标题
-                lines = content.split("\n")
+
+                # 解析 frontmatter
+                frontmatter, body = parse_story_frontmatter(content)
+
+                # 从正文中提取标题
                 title = story_id
-                for line in lines:
+                for line in body.split("\n"):
                     if line.startswith("# "):
                         title = line[2:].strip()
                         break
+
                 stories.append({
                     "id": story_id,
                     "title": title,
-                    "filename": filename
+                    "filename": filename,
+                    "bgm": frontmatter.get("bgm"),
                 })
 
     return {"stories": stories}
@@ -155,10 +202,12 @@ async def get_story(skill_id: str, story_id: str):
     async with aiofiles.open(file_path, "r", encoding="utf-8") as f:
         content = await f.read()
 
-    # 解析 Markdown
-    lines = content.split("\n")
+    # 解析 frontmatter 和正文
+    frontmatter, body = parse_story_frontmatter(content)
+
+    # 从正文中提取标题
     title = story_id
-    for line in lines:
+    for line in body.split("\n"):
         if line.startswith("# "):
             title = line[2:].strip()
             break
@@ -166,7 +215,8 @@ async def get_story(skill_id: str, story_id: str):
     return {
         "id": story_id,
         "title": title,
-        "content": content
+        "content": body,  # 返回不含 frontmatter 的正文
+        "bgm": frontmatter.get("bgm"),
     }
 
 
@@ -183,8 +233,8 @@ async def create_story(skill_id: str, story: StoryCreate):
     if os.path.exists(file_path):
         raise HTTPException(status_code=409, detail=f"故事 {story_id} 已存在")
 
-    # 创建 Markdown 内容
-    content = f"# {story.title}\n\n{story.content}"
+    # 创建带 frontmatter 的 Markdown 内容
+    content = build_story_content(story.title, story.content, story.bgm)
 
     async with aiofiles.open(file_path, "w", encoding="utf-8") as f:
         await f.write(content)
@@ -192,7 +242,8 @@ async def create_story(skill_id: str, story: StoryCreate):
     return {
         "id": story_id,
         "title": story.title,
-        "content": content
+        "content": story.content,
+        "bgm": story.bgm,
     }
 
 
@@ -207,24 +258,29 @@ async def update_story(skill_id: str, story_id: str, story: StoryUpdate):
     async with aiofiles.open(file_path, "r", encoding="utf-8") as f:
         existing_content = await f.read()
 
-    # 解析现有标题
-    lines = existing_content.split("\n")
+    # 解析 frontmatter 和正文
+    frontmatter, body = parse_story_frontmatter(existing_content)
+
+    # 解析现有标题和正文
     existing_title = story_id
-    content_start = 0
-    for i, line in enumerate(lines):
+    existing_body = body
+    body_lines = body.split("\n")
+    for i, line in enumerate(body_lines):
         if line.startswith("# "):
             existing_title = line[2:].strip()
-            content_start = i + 1
+            existing_body = "\n".join(body_lines[i+1:]).strip()
             break
 
     # 更新内容
     new_title = story.title if story.title else existing_title
-    if story.content:
-        new_content = f"# {new_title}\n\n{story.content}"
-    else:
-        # 保留原有正文
-        body = "\n".join(lines[content_start:]).strip()
-        new_content = f"# {new_title}\n\n{body}"
+    new_body = story.content if story.content else existing_body
+    # bgm: 如果传了空字符串表示清除，传 None 表示不变
+    new_bgm = story.bgm if story.bgm is not None else frontmatter.get("bgm")
+    if new_bgm == "":
+        new_bgm = None  # 空字符串表示清除 bgm
+
+    # 构建新内容
+    new_content = build_story_content(new_title, new_body, new_bgm)
 
     async with aiofiles.open(file_path, "w", encoding="utf-8") as f:
         await f.write(new_content)
@@ -232,7 +288,8 @@ async def update_story(skill_id: str, story_id: str, story: StoryUpdate):
     return {
         "id": story_id,
         "title": new_title,
-        "content": new_content
+        "content": new_body,
+        "bgm": new_bgm,
     }
 
 

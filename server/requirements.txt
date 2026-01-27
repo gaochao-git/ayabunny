@@ -32,3 +32,4 @@ onnxruntime>=1.16.0         # Silero VAD ONNX 版
 
 # ASR (内置 Whisper)
 faster-whisper>=1.0.0
+PyYAML>=6.0

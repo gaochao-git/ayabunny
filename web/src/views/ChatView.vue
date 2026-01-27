@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useChat } from '@/composables/useChat'
 import { useAudioRecorder } from '@/composables/useAudioRecorder'
 import { useTTSPlayer } from '@/composables/useTTSPlayer'
 import { useWebRTCVAD } from '@/composables/useWebRTCVAD'
 import { useSileroVAD } from '@/composables/useSileroVAD'
 import { useFunASRVAD } from '@/composables/useFunASRVAD'
+import { useBGM } from '@/composables/useBGM'
 import { useSettingsStore, BACKGROUNDS, AVATARS } from '@/stores/settings'
 import { transcribe } from '@/api/asr'
 import ChatArea from '@/components/ChatArea.vue'
@@ -13,6 +14,41 @@ import RightPanel from '@/components/RightPanel.vue'
 
 const settings = useSettingsStore()
 const chat = useChat()
+
+// 背景音乐播放器
+const bgm = useBGM({
+  volume: () => settings.bgmVolume,
+  enabled: () => settings.bgmEnabled,
+})
+
+// 页面关闭时停止背景音乐
+const handleBeforeUnload = () => {
+  bgm.stop()
+}
+
+onMounted(() => {
+  window.addEventListener('beforeunload', handleBeforeUnload)
+})
+
+onUnmounted(() => {
+  bgm.stop()
+  window.removeEventListener('beforeunload', handleBeforeUnload)
+})
+
+// 记录是否正在讲故事
+const isStoryMode = ref(false)
+
+// 监听技能变化，讲故事时播放背景音乐
+watch(() => chat.currentSkill.value, (skill, oldSkill) => {
+  console.log('[BGM] 技能变化:', oldSkill, '->', skill, '| BGM:', chat.currentBgm.value)
+  // 检测 tell_story 技能（兼容不同格式）
+  if (skill && (skill === 'tell_story' || skill.includes('tell_story'))) {
+    console.log('[BGM] 检测到讲故事技能，尝试播放背景音乐, bgm:', chat.currentBgm.value)
+    isStoryMode.value = true
+    // 传递故事指定的 BGM（如果有），否则随机播放
+    bgm.play(chat.currentBgm.value)
+  }
+})
 
 // 用于前向引用的变量
 let startCallRecording: () => Promise<void>
@@ -63,6 +99,12 @@ ttsPlayer = useTTSPlayer({
     // 通话中自动继续录音（检查状态避免并发）
     if (isInCall.value && !callRecorder.isRecording.value && !isProcessingCall.value) {
       startCallRecording()
+    }
+    // 故事模式：TTS 队列播完后立即停止背景音乐
+    if (isStoryMode.value && !ttsPlayer.isPending.value) {
+      console.log('[BGM] 故事播放完毕，停止背景音乐')
+      isStoryMode.value = false
+      bgm.stop()  // 立即渐出停止
     }
   },
 })
@@ -246,6 +288,9 @@ async function handleSend() {
   const text = inputText.value.trim()
   inputText.value = ''
 
+  // 用户交互时预加载 BGM（移动端需要在点击时预加载）
+  bgm.preload()
+
   // 文字模式不播放语音
   await chat.send(text)
 }
@@ -292,6 +337,7 @@ function toggleCall() {
 async function startCall() {
   // 移动端需要在用户交互时解锁音频
   await ttsPlayer.unlock()
+  bgm.unlock()  // 同时解锁 BGM
   isInCall.value = true
   await startCallRecording()
 }
@@ -614,19 +660,26 @@ function clearChat() {
               </svg>
             </button>
 
-            <!-- 发送按钮 -->
+            <!-- 发送/停止按钮 -->
             <button
-              @click="handleSend"
-              :disabled="!canSend"
+              @click="chat.isLoading.value ? chat.abort() : handleSend()"
+              :disabled="!chat.isLoading.value && !canSend"
               :class="[
                 'w-9 h-9 rounded-full flex items-center justify-center transition-colors',
-                canSend
-                  ? 'bg-blue-500 hover:bg-blue-600 text-white'
-                  : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                chat.isLoading.value
+                  ? 'bg-blue-500 hover:bg-blue-600 text-white animate-breathing'
+                  : canSend
+                    ? 'bg-blue-500 hover:bg-blue-600 text-white'
+                    : 'bg-gray-200 text-gray-400 cursor-not-allowed'
               ]"
-              title="发送"
+              :title="chat.isLoading.value ? '停止生成' : '发送'"
             >
-              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <!-- 停止图标（方块） -->
+              <svg v-if="chat.isLoading.value" class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                <rect x="6" y="6" width="12" height="12" rx="2" />
+              </svg>
+              <!-- 发送图标（上箭头） -->
+              <svg v-else class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 10l7-7m0 0l7 7m-7-7v18" />
               </svg>
             </button>
@@ -759,5 +812,21 @@ function clearChat() {
   50% {
     transform: translateY(-10px);
   }
+}
+
+/* 呼吸效果 */
+@keyframes breathing {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.7;
+    transform: scale(0.95);
+  }
+}
+
+.animate-breathing {
+  animation: breathing 1.5s ease-in-out infinite;
 }
 </style>
