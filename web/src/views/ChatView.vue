@@ -118,7 +118,12 @@ const getWakeWords = () => {
     return []  // 直接模式：不需要唤醒词验证
   }
 
-  // 打断模式：需要说唤醒词才能打断 TTS
+  // 实时打断模式：不需要关键词，直接打断
+  if (settings.vadInstantInterrupt) {
+    return []  // 返回空数组，VAD 检测到语音就立即触发
+  }
+
+  // 关键词打断模式：需要说唤醒词才能打断 TTS
   const name = settings.assistantName || '小智'
   const aliases = settings.assistantAliases || []
   return [

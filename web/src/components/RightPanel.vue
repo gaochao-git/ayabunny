@@ -825,7 +825,7 @@ onUnmounted(() => {
               </div>
               <!-- 同音词 -->
               <div class="flex-1 min-w-0">
-                <label class="text-xs text-gray-500 mb-1 block">同音词（回车添加）</label>
+                <label class="text-xs text-gray-500 mb-1 block">同音词</label>
                 <div class="flex flex-wrap gap-1.5 p-2 border rounded-lg min-h-[42px] bg-white focus-within:ring-2 focus-within:ring-pink-500">
                   <span
                     v-for="(alias, index) in settings.assistantAliases"
@@ -846,9 +846,16 @@ onUnmounted(() => {
                     v-model="aliasInput"
                     @keydown.enter.prevent="addAlias"
                     type="text"
-                    placeholder="输入同音词"
-                    class="flex-1 min-w-[80px] text-sm outline-none bg-transparent"
+                    placeholder="输入"
+                    class="flex-1 min-w-[50px] text-sm outline-none bg-transparent"
                   />
+                  <button
+                    v-if="aliasInput.trim()"
+                    @click="addAlias"
+                    class="px-2 py-0.5 bg-pink-500 text-white text-xs rounded-full hover:bg-pink-600"
+                  >
+                    添加
+                  </button>
                 </div>
               </div>
             </div>
@@ -1195,6 +1202,13 @@ onUnmounted(() => {
                 <span class="text-sm text-gray-600">启用语音打断</span>
                 <input type="checkbox" v-model="settings.vadEnabled" class="w-5 h-5 rounded text-red-500 focus:ring-red-500" />
               </label>
+            </div>
+            <div class="bg-white border rounded-lg p-2 cursor-help" title="开启后检测到说话立即打断，关闭则需要说关键词才打断">
+              <label class="flex items-center justify-between cursor-pointer">
+                <span class="text-sm text-gray-600">实时打断</span>
+                <input type="checkbox" v-model="settings.vadInstantInterrupt" class="w-5 h-5 rounded text-red-500 focus:ring-red-500" />
+              </label>
+              <p class="text-xs text-gray-400 mt-1">{{ settings.vadInstantInterrupt ? '说话立即打断' : '需要说关键词' }}</p>
             </div>
             <div class="bg-white border rounded-lg p-2 cursor-help" :title="tooltips.vadType">
               <div class="flex justify-between items-center mb-2">
