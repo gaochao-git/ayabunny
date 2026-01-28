@@ -23,6 +23,11 @@ const vadIgnoreTimeDisplay = computed(() => {
   return settings.vadIgnoreTime + 'ms'
 })
 
+// 格式化唤醒词录音时长显示
+const vadWakeWordTimeoutDisplay = computed(() => {
+  return settings.vadWakeWordTimeout + 'ms'
+})
+
 // 参数说明
 const tooltips = {
   // ASR
@@ -46,6 +51,7 @@ const tooltips = {
   vadThreshold: '打断检测的音量阈值。你的声音需要超过此值才会触发打断。值越小越灵敏，但可能被背景噪音误触发。（仅简单模式）',
   vadTriggerCount: '连续检测到多少次超过阈值才真正触发打断。值越大越不容易误触发，但打断响应变慢。',
   vadIgnoreTime: 'AI开始说话后忽略麦克风输入的时间。防止AI的声音通过麦克风回传导致自己打断自己。',
+  vadWakeWordTimeout: '检测到语音后录音多久就发送识别。值越小打断越快，但可能截断唤醒词；值越大识别越完整，但延迟越高。500ms适合"小智"、"停"等短词。',
 }
 </script>
 
@@ -384,6 +390,27 @@ const tooltips = {
               <input
                 type="range"
                 v-model.number="settings.vadIgnoreTime"
+                min="300"
+                max="1500"
+                step="100"
+                class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-red-500"
+              />
+            </div>
+
+            <!-- 快速检测时长 -->
+            <div class="bg-white border rounded-lg p-2 cursor-help" :title="tooltips.vadWakeWordTimeout">
+              <div class="flex justify-between items-center mb-2">
+                <span class="text-sm text-gray-600 flex items-center gap-1">
+                  快速检测
+                  <svg class="w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                </span>
+                <span class="text-sm font-medium">{{ vadWakeWordTimeoutDisplay }}</span>
+              </div>
+              <input
+                type="range"
+                v-model.number="settings.vadWakeWordTimeout"
                 min="300"
                 max="1500"
                 step="100"

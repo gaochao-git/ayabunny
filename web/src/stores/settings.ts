@@ -121,6 +121,7 @@ export const useSettingsStore = defineStore('settings', () => {
   const vadThreshold = ref(initial.vadThreshold ?? 60)              // 打断阈值 (10-80)，仅简单模式
   const vadTriggerCount = ref(initial.vadTriggerCount ?? 5)         // 触发次数 (2-10)，仅简单模式
   const vadIgnoreTime = ref(initial.vadIgnoreTime ?? 800)           // 忽略时间 (ms)
+  const vadWakeWordTimeout = ref(initial.vadWakeWordTimeout ?? 500) // 唤醒词录音时长 (ms)，越短响应越快
 
   // ========== 外观设置 ==========
   const background = ref<BackgroundType>(initial.background ?? 'sunset')  // 背景主题
@@ -158,6 +159,7 @@ export const useSettingsStore = defineStore('settings', () => {
       vadThreshold: vadThreshold.value,
       vadTriggerCount: vadTriggerCount.value,
       vadIgnoreTime: vadIgnoreTime.value,
+      vadWakeWordTimeout: vadWakeWordTimeout.value,
       // 外观
       background: background.value,
       avatar: avatar.value,
@@ -176,7 +178,7 @@ export const useSettingsStore = defineStore('settings', () => {
       asrService, silenceThreshold, silenceDuration, autoSend,
       llmModel, llmTemperature, llmMaxTokens, llmMaxHistory,
       ttsEnabled, ttsModel, ttsVoice, ttsCustomVoiceId, ttsSpeed, ttsGain,
-      vadEnabled, vadType, vadThreshold, vadTriggerCount, vadIgnoreTime,
+      vadEnabled, vadType, vadThreshold, vadTriggerCount, vadIgnoreTime, vadWakeWordTimeout,
       background, avatar, assistantName, assistantAliases,
       bgmEnabled, bgmVolume,
     ],
@@ -208,6 +210,7 @@ export const useSettingsStore = defineStore('settings', () => {
     vadThreshold,
     vadTriggerCount,
     vadIgnoreTime,
+    vadWakeWordTimeout,
     // 外观
     background,
     avatar,

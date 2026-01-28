@@ -27,6 +27,8 @@ export interface WebRTCVADOptions {
   transcribeFn?: (blob: Blob) => Promise<string>
   /** 中断词检测到时的回调 */
   onWakeWordDetected?: (word: string) => void
+  /** 唤醒词录音时长 (ms)，检测到语音后录制这么长时间就发送，不等静音 */
+  wakeWordTimeout?: number | (() => number)
 }
 
 export function useWebRTCVAD(options: WebRTCVADOptions = {}) {
@@ -41,6 +43,7 @@ export function useWebRTCVAD(options: WebRTCVADOptions = {}) {
     wakeWords,
     transcribeFn,
     onWakeWordDetected,
+    wakeWordTimeout = 500,  // 默认 500ms，快速响应
   } = options
 
   const isActive = ref(false)
@@ -58,6 +61,7 @@ export function useWebRTCVAD(options: WebRTCVADOptions = {}) {
   // 音频录制相关
   let mediaRecorder: MediaRecorder | null = null
   let audioChunks: Blob[] = []
+  let wakeWordTimerId: ReturnType<typeof setTimeout> | null = null  // 快速检测定时器
 
   // 获取配置值
   function getThreshold(): number {
@@ -71,6 +75,10 @@ export function useWebRTCVAD(options: WebRTCVADOptions = {}) {
   function getWakeWords(): string[] {
     if (typeof wakeWords === 'function') return wakeWords()
     return wakeWords ?? []
+  }
+
+  function getWakeWordTimeout(): number {
+    return typeof wakeWordTimeout === 'function' ? wakeWordTimeout() : wakeWordTimeout
   }
 
   /**
@@ -209,12 +217,27 @@ export function useWebRTCVAD(options: WebRTCVADOptions = {}) {
       // 连续检测到语音，触发开始
       if (!isSpeaking.value && speechFrameCount >= speechFrames) {
         const words = getWakeWords()
-        console.log('[WebRTC VAD] 检测到语音开始, 中断词:', words)
+        const timeout = getWakeWordTimeout()
+        console.log('[WebRTC VAD] 检测到语音开始, 中断词:', words, '快速检测时长:', timeout, 'ms')
         isSpeaking.value = true
 
         // 如果配置了中断词，开始录音
         if (words.length > 0 && transcribeFn) {
           startRecording()
+
+          // 快速检测：timeout 毫秒后强制发送（不等静音）
+          wakeWordTimerId = setTimeout(async () => {
+            if (isSpeaking.value && mediaRecorder?.state === 'recording') {
+              console.log(`[WebRTC VAD] 快速检测：${timeout}ms 后发送`)
+              isSpeaking.value = false
+              const matched = await verifyWakeWord()
+              if (matched) {
+                onSpeechStart?.()
+              }
+              onSpeechEnd?.()
+            }
+            wakeWordTimerId = null
+          }, timeout)
         } else {
           // 没有中断词要求，直接触发回调
           onSpeechStart?.()
@@ -226,8 +249,14 @@ export function useWebRTCVAD(options: WebRTCVADOptions = {}) {
 
       // 连续检测到静音，触发结束
       if (isSpeaking.value && silenceFrameCount >= silenceFrames) {
-        console.log('[WebRTC VAD] 检测到语音结束')
+        console.log('[WebRTC VAD] 检测到语音结束（静音）')
         isSpeaking.value = false
+
+        // 取消快速检测定时器（如果还没触发）
+        if (wakeWordTimerId) {
+          clearTimeout(wakeWordTimerId)
+          wakeWordTimerId = null
+        }
 
         // 如果配置了中断词，进行验证
         const words = getWakeWords()
@@ -298,6 +327,12 @@ export function useWebRTCVAD(options: WebRTCVADOptions = {}) {
     if (animationId) {
       cancelAnimationFrame(animationId)
       animationId = null
+    }
+
+    // 清理快速检测定时器
+    if (wakeWordTimerId) {
+      clearTimeout(wakeWordTimerId)
+      wakeWordTimerId = null
     }
 
     if (mediaStream) {

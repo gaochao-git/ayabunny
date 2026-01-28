@@ -144,6 +144,7 @@ function handleVADSpeechStart() {
 // WebRTC VAD（基于频谱分析）
 const webrtcVAD = useWebRTCVAD({
   ignoreTime: () => settings.vadIgnoreTime,
+  wakeWordTimeout: () => settings.vadWakeWordTimeout,  // 快速检测时长
   wakeWords: getWakeWords,
   transcribeFn: transcribeForWakeWord,
   onWakeWordDetected: (word) => {
