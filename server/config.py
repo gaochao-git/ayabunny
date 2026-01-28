@@ -39,6 +39,12 @@ class Settings(BaseSettings):
     # webrtc 兼容性最好，不需要额外系统库
     VAD_BACKEND: str = "webrtc"
 
+    # 视频配置
+    VIDEO_FRAME_INTERVAL: float = 2.0  # 帧提取间隔（秒）
+    VIDEO_MAX_DURATION: int = 60  # 最大录制时长（秒）
+    VIDEO_FRAME_QUALITY: int = 70  # JPEG 压缩质量
+    VIDEO_MAX_FRAMES: int = 30  # 单次分析最大帧数
+
     # 数据目录
     DATA_ROOT: str = os.path.join(os.path.dirname(__file__), "skills")
 

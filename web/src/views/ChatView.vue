@@ -8,8 +8,10 @@ import { useSileroVAD } from '@/composables/useSileroVAD'
 import { useFunASRVAD } from '@/composables/useFunASRVAD'
 import { useBGM } from '@/composables/useBGM'
 import { useMusicPlayer } from '@/composables/useMusicPlayer'
+import { useVideoCapture } from '@/composables/useVideoCapture'
 import { useSettingsStore, BACKGROUNDS, AVATARS, type AvatarType } from '@/stores/settings'
 import { transcribe } from '@/api/asr'
+import { analyzeFrame, analyzeFrames, analyzeVideo } from '@/api/video'
 import ChatArea from '@/components/ChatArea.vue'
 import RightPanel from '@/components/RightPanel.vue'
 import Avatar3D from '@/components/Avatar3D.vue'
@@ -57,8 +59,21 @@ const showSettings = ref(false)
 const isInCall = ref(false)       // 是否在通话中
 const isTranscribing = ref(false) // 是否正在语音转文字
 const isProcessingCall = ref(false) // 是否正在处理通话（防止并发）
-const pendingImage = ref<string | null>(null)  // 待发送的图片（base64）
-const imageInputRef = ref<HTMLInputElement | null>(null)  // 图片输入框引用
+// 附件状态（图片或视频）
+const pendingMedia = ref<{ type: 'image' | 'video'; data: string; blob?: Blob } | null>(null)
+const mediaInputRef = ref<HTMLInputElement | null>(null)
+
+// 摄像头状态（独立开关）
+const isCameraOn = ref(false)
+const cameraPreviewRef = ref<HTMLVideoElement | null>(null)
+const isAnalyzingMedia = ref(false)  // 是否正在分析媒体
+
+// 视频捕获
+const videoCapture = useVideoCapture({
+  maxDuration: 60,
+  frameInterval: 3000,  // 实时模式 3 秒采样一次
+  resolution: { width: 640, height: 480 }
+})
 
 // 当前选择的背景和头像
 const currentBackground = computed(() =>
@@ -408,7 +423,7 @@ watch(() => chat.musicAction.value, async (action) => {
 })
 
 // 计算属性
-const canSend = computed(() => (inputText.value.trim() || pendingImage.value) && !chat.isLoading.value)
+const canSend = computed(() => (inputText.value.trim() || pendingMedia.value) && !chat.isLoading.value && !isAnalyzingMedia.value)
 
 // 状态文字（通话中显示）
 const statusText = computed(() => {
@@ -445,72 +460,123 @@ async function handleSend() {
   if (!canSend.value) return
 
   const text = inputText.value.trim()
-  const image = pendingImage.value
+  const media = pendingMedia.value
   inputText.value = ''
-  pendingImage.value = null  // 清空待发送图片
+  clearPendingMedia()
 
   // 用户交互时预加载 BGM（移动端需要在点击时预加载）
   bgm.preload()
 
-  // 文字模式不播放语音（带图片）
-  await chat.send(text, undefined, image || undefined)
+  // 根据媒体类型处理
+  if (media?.type === 'video' && media.blob) {
+    // 视频：调用视频分析 API
+    isAnalyzingMedia.value = true
+    chat.addUserMessage(text)
+    try {
+      let response = ''
+      for await (const event of analyzeVideo(media.blob, text)) {
+        if (event.type === 'token' && event.content) {
+          response += event.content
+          chat.streamingContent.value = response
+        }
+      }
+      chat.addAssistantMessage(response)
+      chat.streamingContent.value = ''
+    } finally {
+      isAnalyzingMedia.value = false
+    }
+  } else if (media?.type === 'image') {
+    // 图片：走 chat API
+    await chat.send(text, undefined, media.data)
+  } else if (isCameraOn.value && videoCapture.isPreviewActive.value) {
+    // 摄像头开启：捕获当前帧
+    const frame = videoCapture.captureFrame()
+    const frameImage = frame ? `data:image/jpeg;base64,${frame}` : undefined
+    await chat.send(text, undefined, frameImage)
+  } else {
+    // 纯文字
+    await chat.send(text)
+  }
 }
 
-// 处理图片选择
-function handleImageSelect(event: Event) {
+// 处理媒体选择（图片或视频）
+function handleMediaSelect(event: Event) {
   const input = event.target as HTMLInputElement
   const file = input.files?.[0]
   if (!file) return
 
-  // 压缩并转 base64
-  const reader = new FileReader()
-  reader.onload = (e) => {
-    const img = new Image()
-    img.onload = () => {
-      // 压缩图片（最大 800px）
-      const maxSize = 800
-      let { width, height } = img
-      if (width > maxSize || height > maxSize) {
-        if (width > height) {
-          height = (height / width) * maxSize
-          width = maxSize
-        } else {
-          width = (width / height) * maxSize
-          height = maxSize
+  const isVideo = file.type.startsWith('video/')
+  const isImage = file.type.startsWith('image/')
+
+  if (isVideo) {
+    // 视频：保存 blob 用于上传
+    const url = URL.createObjectURL(file)
+    pendingMedia.value = {
+      type: 'video',
+      data: url,
+      blob: file
+    }
+    // 如果输入框为空，添加默认提示
+    if (!inputText.value.trim()) {
+      inputText.value = '分析这段视频'
+    }
+  } else if (isImage) {
+    // 图片：压缩并转 base64
+    const reader = new FileReader()
+    reader.onload = (e) => {
+      const img = new Image()
+      img.onload = () => {
+        // 压缩图片（最大 800px）
+        const maxSize = 800
+        let { width, height } = img
+        if (width > maxSize || height > maxSize) {
+          if (width > height) {
+            height = (height / width) * maxSize
+            width = maxSize
+          } else {
+            width = (width / height) * maxSize
+            height = maxSize
+          }
+        }
+
+        const canvas = document.createElement('canvas')
+        canvas.width = width
+        canvas.height = height
+        const ctx = canvas.getContext('2d')!
+        ctx.drawImage(img, 0, 0, width, height)
+
+        // 转为 base64（JPEG 格式，质量 0.8）
+        const base64 = canvas.toDataURL('image/jpeg', 0.8)
+        pendingMedia.value = {
+          type: 'image',
+          data: base64
+        }
+
+        // 如果输入框为空，添加默认提示
+        if (!inputText.value.trim()) {
+          inputText.value = '这是什么？'
         }
       }
-
-      const canvas = document.createElement('canvas')
-      canvas.width = width
-      canvas.height = height
-      const ctx = canvas.getContext('2d')!
-      ctx.drawImage(img, 0, 0, width, height)
-
-      // 转为 base64（JPEG 格式，质量 0.8）
-      const base64 = canvas.toDataURL('image/jpeg', 0.8)
-      pendingImage.value = base64
-
-      // 如果输入框为空，添加默认提示
-      if (!inputText.value.trim()) {
-        inputText.value = '这是什么？'
-      }
+      img.src = e.target?.result as string
     }
-    img.src = e.target?.result as string
+    reader.readAsDataURL(file)
   }
-  reader.readAsDataURL(file)
 
   // 重置 input
   input.value = ''
 }
 
-// 清除待发送图片
-function clearPendingImage() {
-  pendingImage.value = null
+// 清除待发送媒体
+function clearPendingMedia() {
+  if (pendingMedia.value?.type === 'video' && pendingMedia.value.data) {
+    URL.revokeObjectURL(pendingMedia.value.data)
+  }
+  pendingMedia.value = null
 }
 
-// 触发图片选择
-function triggerImageSelect() {
-  imageInputRef.value?.click()
+// 触发媒体选择
+function triggerMediaSelect() {
+  mediaInputRef.value?.click()
 }
 
 // 语音转文字（填充到输入框）
@@ -551,13 +617,15 @@ function toggleCall() {
   }
 }
 
-// 开始语音通话
+// 开始通话（摄像头开=视频通话，关=语音通话）
 async function startCall() {
   // 移动端需要在用户交互时解锁音频
   await ttsPlayer.unlock()
-  bgm.unlock()  // 同时解锁 BGM
-  musicPlayer.unlock()  // 解锁儿歌播放
+  bgm.unlock()
+  musicPlayer.unlock()
   isInCall.value = true
+
+  console.log('[Call] 开始通话，摄像头:', isCameraOn.value ? '开启' : '关闭')
 
   // 启动 VAD 监听，检测到语音再开始录音
   if (settings.vadEnabled) {
@@ -569,7 +637,7 @@ async function startCall() {
   }
 }
 
-// 结束语音通话
+// 结束通话
 function endCall() {
   console.log('[Call] 结束通话')
   isInCall.value = false
@@ -583,8 +651,8 @@ function endCall() {
   ttsPlayer.stop()  // 会清空 TTS 队列
   vad.stop()
 
+  // 注意：不关闭摄像头，让用户自行控制
   // 注意：不停止儿歌，让用户可以继续听
-  // 用户可以说"停止"来手动停止儿歌
 }
 
 // 开始通话录音
@@ -631,6 +699,16 @@ async function handleCallRecordingStop() {
     if (result.success && result.text) {
       console.log('[Call] ASR 识别结果:', result.text)
 
+      // 视频模式：捕获当前帧，让 AI 看到画面
+      let frameImage: string | undefined
+      if (isCameraOn.value && videoCapture.isPreviewActive.value) {
+        const frame = videoCapture.captureFrame()
+        if (frame) {
+          frameImage = `data:image/jpeg;base64,${frame}`
+          console.log('[VideoCall] 附加当前视频帧')
+        }
+      }
+
       // 通话模式：流式 TTS
       const onSentence = settings.ttsEnabled
         ? (sentence: string) => {
@@ -641,7 +719,7 @@ async function handleCallRecordingStop() {
           }
         : undefined
 
-      await chat.send(result.text, onSentence)
+      await chat.send(result.text, onSentence, frameImage)
 
       // chat.send 完成后，检查是否需要启动录音
       // 条件：TTS 没有启用，或 TTS 没有在播放/待播放
@@ -696,6 +774,35 @@ function toggleBGM() {
 function clearChat() {
   chat.clear()
 }
+
+// ============ 摄像头控制 ============
+
+// 切换摄像头
+async function toggleCamera() {
+  if (isCameraOn.value) {
+    // 关闭摄像头
+    videoCapture.stopPreview()
+    isCameraOn.value = false
+    console.log('[Camera] Stopped')
+  } else {
+    // 开启摄像头：先设置状态，等元素渲染后再启动预览
+    isCameraOn.value = true
+    console.log('[Camera] Turning on...')
+    // 预览会在 watch(cameraPreviewRef) 中自动启动
+  }
+}
+
+// 监听摄像头预览元素变化
+watch(cameraPreviewRef, async (el) => {
+  if (el && isCameraOn.value && !videoCapture.isPreviewActive.value) {
+    try {
+      await videoCapture.startPreview(el)
+    } catch (error) {
+      console.error('[Camera] Auto start failed:', error)
+      isCameraOn.value = false
+    }
+  }
+})
 </script>
 
 <template>
@@ -764,11 +871,28 @@ function clearChat() {
 
       <!-- 主内容区 - 根据模式显示不同内容 -->
       <div class="flex-1 min-h-0 flex flex-col">
-        <!-- 通话中：显示角色头像 -->
+        <!-- 通话中：显示角色头像或摄像头预览 -->
         <template v-if="isInCall">
           <div class="flex-1 flex flex-col items-center justify-center pb-16 bg-gradient-to-b from-white/50 to-white">
-            <!-- 3D 角色区域 -->
-            <div class="relative cursor-pointer" @click="toggleCall">
+            <!-- 摄像头预览（摄像头开启时） -->
+            <div v-if="isCameraOn" class="relative w-full max-w-sm mx-auto cursor-pointer" @click="toggleCall">
+              <video
+                ref="cameraPreviewRef"
+                autoplay
+                muted
+                playsinline
+                class="w-full rounded-2xl shadow-lg bg-black"
+                style="transform: scaleX(-1);"
+              ></video>
+              <!-- 通话中红点 -->
+              <div class="absolute top-2 right-2 w-4 h-4 bg-red-500 rounded-full border-2 border-white animate-pulse"></div>
+              <!-- 点击挂断提示 -->
+              <div class="absolute bottom-2 left-1/2 -translate-x-1/2 text-white text-xs bg-black/50 px-2 py-1 rounded">
+                点击挂断
+              </div>
+            </div>
+            <!-- 3D 角色区域（摄像头关闭时） -->
+            <div v-else class="relative cursor-pointer" @click="toggleCall">
               <!-- 3D 宠物 -->
               <Avatar3D
                 :type="mascotType"
@@ -829,7 +953,9 @@ function clearChat() {
               class="mb-2"
             />
             <h2 class="text-xl font-semibold text-gray-700 mb-2">你好，我是{{ settings.assistantName || '小智' }}</h2>
-            <p class="text-gray-500 text-sm mb-6">点击电话按钮开始语音对话，或直接输入文字</p>
+            <p class="text-gray-500 text-sm mb-6">
+              点击通话按钮开始对话，或输入文字发送
+            </p>
           </div>
         </template>
       </div>
@@ -841,12 +967,13 @@ function clearChat() {
           说完自动识别 | 点击头像挂断
         </div>
 
-        <!-- 待发送图片预览 -->
-        <div v-if="pendingImage" class="mb-2 flex items-center gap-2 px-2">
+        <!-- 待发送媒体预览 -->
+        <div v-if="pendingMedia" class="mb-2 flex items-center gap-2 px-2">
           <div class="relative">
-            <img :src="pendingImage" class="w-16 h-16 object-cover rounded-lg border" />
+            <img v-if="pendingMedia.type === 'image'" :src="pendingMedia.data" class="w-16 h-16 object-cover rounded-lg border" />
+            <video v-else :src="pendingMedia.data" class="w-16 h-16 object-cover rounded-lg border" />
             <button
-              @click="clearPendingImage"
+              @click="clearPendingMedia"
               class="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center text-xs hover:bg-red-600"
             >
               <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -854,17 +981,30 @@ function clearChat() {
               </svg>
             </button>
           </div>
-          <span class="text-xs text-gray-400">图片已选择</span>
+          <span class="text-xs text-gray-400">{{ pendingMedia.type === 'image' ? '图片' : '视频' }}已选择</span>
         </div>
 
-        <!-- 隐藏的图片输入 -->
+        <!-- 摄像头预览（非通话时） -->
+        <div v-if="isCameraOn && !isInCall" class="mb-2 flex items-center gap-2 px-2">
+          <video
+            ref="cameraPreviewRef"
+            autoplay
+            muted
+            playsinline
+            class="w-20 h-16 object-cover rounded-lg border bg-black"
+            style="transform: scaleX(-1);"
+          ></video>
+          <span class="text-xs text-gray-400">摄像头已开启</span>
+        </div>
+
+        <!-- 隐藏的媒体输入 -->
         <input
-          ref="imageInputRef"
+          ref="mediaInputRef"
           type="file"
-          accept="image/*"
+          accept="image/*,video/*"
           capture="environment"
           class="hidden"
-          @change="handleImageSelect"
+          @change="handleMediaSelect"
         />
 
         <!-- 输入框（按钮在内部） -->
@@ -879,18 +1019,35 @@ function clearChat() {
             autocomplete="off"
           />
 
-          <!-- 按钮组 -->
+          <!-- 按钮组：附件、摄像头、语音、通话、发送 -->
           <div class="flex items-center gap-1 ml-2">
-            <!-- 拍照按钮 -->
+            <!-- 附件按钮（图片/视频） -->
             <button
-              @click="triggerImageSelect"
-              :disabled="chat.isLoading.value"
+              @click="triggerMediaSelect"
+              :disabled="chat.isLoading.value || isAnalyzingMedia"
               class="w-9 h-9 rounded-full flex items-center justify-center transition-colors bg-green-500 hover:bg-green-600 text-white disabled:bg-gray-200 disabled:text-gray-400"
-              title="拍照问答"
+              title="选择图片/视频"
             >
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+              </svg>
+            </button>
+
+            <!-- 摄像头按钮 -->
+            <button
+              v-if="videoCapture.isSupported.value"
+              @click="toggleCamera"
+              :disabled="chat.isLoading.value"
+              :class="[
+                'w-9 h-9 rounded-full flex items-center justify-center transition-colors',
+                isCameraOn
+                  ? 'bg-blue-500 hover:bg-blue-600 text-white'
+                  : 'bg-gray-200 hover:bg-gray-300 text-gray-500'
+              ]"
+              :title="isCameraOn ? '关闭摄像头' : '开启摄像头'"
+            >
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
               </svg>
             </button>
 
@@ -915,7 +1072,7 @@ function clearChat() {
               </svg>
             </button>
 
-            <!-- 电话按钮 -->
+            <!-- 通话按钮 -->
             <button
               @click="toggleCall"
               :class="[
@@ -924,7 +1081,7 @@ function clearChat() {
                   ? 'bg-red-500 hover:bg-red-600 text-white'
                   : 'bg-gray-200 hover:bg-gray-300 text-gray-500'
               ]"
-              :title="isInCall ? '挂断电话' : '开始通话'"
+              :title="isInCall ? '挂断' : (isCameraOn ? '视频通话' : '语音通话')"
             >
               <svg v-if="isInCall" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 8l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2M5 3a2 2 0 00-2 2v1c0 8.284 6.716 15 15 15h1a2 2 0 002-2v-3.28a1 1 0 00-.684-.948l-4.493-1.498a1 1 0 00-1.21.502l-1.13 2.257a11.042 11.042 0 01-5.516-5.517l2.257-1.128a1 1 0 00.502-1.21L9.228 3.683A1 1 0 008.279 3H5z" />
