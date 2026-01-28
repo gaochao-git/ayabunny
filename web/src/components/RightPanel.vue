@@ -33,6 +33,10 @@ const vadIgnoreTimeDisplay = computed(() => {
   return settings.vadIgnoreTime + 'ms'
 })
 
+const vadWakeWordTimeoutDisplay = computed(() => {
+  return settings.vadWakeWordTimeout + 'ms'
+})
+
 // 同音词输入
 const aliasInput = ref('')
 
@@ -63,6 +67,7 @@ const tooltips = {
   vadEnabled: '开启后，当AI说话时如果检测到你在说话，会自动停止播放。',
   vadType: '选择语音活动检测方式。',
   vadIgnoreTime: 'AI开始说话后忽略麦克风输入的时间。',
+  vadWakeWordTimeout: '检测到语音后多久发送ASR识别。越短响应越快，但可能识别不完整。',
 }
 
 // ========== 自定义音色相关 ==========
@@ -1206,6 +1211,14 @@ onUnmounted(() => {
                 <span class="text-sm font-medium">{{ vadIgnoreTimeDisplay }}</span>
               </div>
               <input type="range" v-model.number="settings.vadIgnoreTime" min="300" max="1500" step="100" class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-red-500" />
+            </div>
+            <div class="bg-white border rounded-lg p-2 cursor-help" :title="tooltips.vadWakeWordTimeout">
+              <div class="flex justify-between items-center mb-2">
+                <span class="text-sm text-gray-600">快速检测</span>
+                <span class="text-sm font-medium">{{ vadWakeWordTimeoutDisplay }}</span>
+              </div>
+              <input type="range" v-model.number="settings.vadWakeWordTimeout" min="300" max="1500" step="100" class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-red-500" />
+              <p class="text-xs text-gray-400 mt-1">检测到语音后多久发送识别</p>
             </div>
           </div>
         </section>
