@@ -91,13 +91,23 @@ async function transcribeForWakeWord(blob: Blob): Promise<string> {
   }
 }
 
-// VAD 语音打断检测（仅通话中使用，支持唤醒词模式）
+// VAD 语音打断检测（通话全程使用）
 // 打断词/唤醒词列表（动态包含助手名字）
+// 注意：只有 TTS 播放中才需要唤醒词验证，正常对话时直接识别
 const getWakeWords = () => {
+  // 只有 TTS 播放中才需要唤醒词（打断模式）
+  // 正常对话时返回空数组（直接模式）
+  if (!ttsPlayer?.isPlaying?.value) {
+    return []  // 直接模式：不需要唤醒词验证
+  }
+
+  // 打断模式：需要说唤醒词才能打断 TTS
   const name = settings.assistantName || '小智'
+  const aliases = settings.assistantAliases || []
   return [
-    // 助手名字（用户设置的）
+    // 助手名字及其同音词
     name,
+    ...aliases,
     // 打断词
     '等等', '等一下', '等会', '等会儿',
     '停', '停一下', '停停', '暂停',
@@ -108,7 +118,7 @@ const getWakeWords = () => {
   ]
 }
 
-// 通用的打断处理函数
+// VAD 检测到语音开始
 function handleVADSpeechStart() {
   console.log('[VAD] 检测到用户说话')
 
@@ -127,18 +137,30 @@ function handleVADSpeechStart() {
 
   // 场景2：儿歌正在播放（TTS 不播放）→ 降低音量，开始录音
   if (musicPlayer.isPlaying.value) {
-    console.log('[VAD] 儿歌播放中，开始录音控制')
+    console.log('[VAD] 儿歌播放中，开始录音')
     musicPlayer.duck()  // 降低儿歌音量，方便用户说话
-    if (isInCall.value && !callRecorder.isRecording.value && !isProcessingCall.value) {
-      startCallRecording()
-    }
-    return
   }
 
-  // 场景3：其他情况（不应该发生，但保险起见）
+  // 开始录音（通用逻辑）
   if (isInCall.value && !callRecorder.isRecording.value && !isProcessingCall.value) {
     startCallRecording()
   }
+}
+
+// VAD 检测到语音结束
+function handleVADSpeechEnd() {
+  console.log('[VAD] 检测到语音结束')
+
+  // 正常对话时（TTS 不播放），不用 VAD 的 onSpeechEnd
+  // 而是让 useAudioRecorder 的静音检测来判断（用户可配置 silenceDuration）
+  // 这样用户思考时停顿一下不会立即发送
+  if (!ttsPlayer?.isPlaying?.value) {
+    console.log('[VAD] 正常对话模式，等待静音检测')
+    return
+  }
+
+  // 打断模式下，VAD 的 onSpeechEnd 不需要特殊处理
+  // 打断逻辑在 wakeWordTimeout 和 verifyWakeWord 里处理
 }
 
 // WebRTC VAD（基于频谱分析）
@@ -151,6 +173,7 @@ const webrtcVAD = useWebRTCVAD({
     console.log(`[WebRTC VAD] 中断词匹配: "${word}"`)
   },
   onSpeechStart: handleVADSpeechStart,
+  onSpeechEnd: handleVADSpeechEnd,
 })
 
 // Silero VAD（内置后端，通过 /ws/vad 访问）
@@ -169,6 +192,7 @@ const sileroVAD = useSileroVAD({
     console.log(`[Silero VAD] 中断词匹配: "${word}" (原文: "${text}")`)
   },
   onSpeechStart: handleVADSpeechStart,
+  onSpeechEnd: handleVADSpeechEnd,
 })
 
 // FunASR VAD（基于服务端 AI 模型 + 中断词验证）
@@ -178,6 +202,7 @@ const funasrVAD = useFunASRVAD({
   wakeWords: getWakeWords,  // 中断词列表（动态获取，包含助手名字）
   transcribeFn: transcribeForWakeWord,  // ASR 识别函数
   onSpeechStart: handleVADSpeechStart,
+  onSpeechEnd: handleVADSpeechEnd,
   onWakeWordDetected: (word, text) => {
     console.log(`[FunASR VAD] 中断词匹配: "${word}" (原文: "${text}")`)
   },
@@ -277,15 +302,17 @@ ttsPlayer = useTTSPlayer({
   },
   onPlayEnd: () => {
     console.log('[TTS] 播放结束')
-    // 播放结束后停止 VAD
-    vad.stop()
-    // 通话中自动继续录音（检查状态避免并发）
+    // 通话中继续 VAD 监听
     if (isInCall.value && !callRecorder.isRecording.value && !isProcessingCall.value) {
-      // 如果儿歌正在播放，启用 VAD 监听用户说话，而不是直接录音
-      if (musicPlayer.isPlaying.value) {
-        console.log('[Call] 儿歌播放中，启用 VAD 监听')
-        vad.start()
+      if (settings.vadEnabled) {
+        // VAD 启用时，继续监听（不需要 stop 再 start，保持运行）
+        console.log('[Call] TTS 结束，继续 VAD 监听')
+        // 如果 VAD 没在运行，重新启动
+        if (!vad.isActive.value) {
+          vad.start()
+        }
       } else {
+        // VAD 未启用，直接开始录音
         startCallRecording()
       }
     }
@@ -388,7 +415,7 @@ const statusText = computed(() => {
   // TTS 播放时，检查 VAD 状态
   if (ttsPlayer.isPlaying.value || ttsPlayer.isPending.value) {
     // 正在验证中断词
-    if (funasrVAD.isCheckingWakeWord.value) {
+    if (funasrVAD.isCheckingWakeWord.value || webrtcVAD.isCheckingWakeWord.value) {
       return '验证中断词...'
     }
     // VAD 检测到语音
@@ -399,6 +426,13 @@ const statusText = computed(() => {
   }
   if (chat.isLoading.value) return '思考中...'
   if (isProcessingCall.value) return '处理中...'
+  // VAD 监听中
+  if (vad.isActive.value) {
+    if (funasrVAD.isSpeaking.value || sileroVAD.isSpeaking.value || webrtcVAD.isSpeaking.value) {
+      return '正在听...'
+    }
+    return '等待说话...'
+  }
   return '等待说话...'
 })
 
@@ -463,7 +497,15 @@ async function startCall() {
   bgm.unlock()  // 同时解锁 BGM
   musicPlayer.unlock()  // 解锁儿歌播放
   isInCall.value = true
-  await startCallRecording()
+
+  // 启动 VAD 监听，检测到语音再开始录音
+  if (settings.vadEnabled) {
+    console.log('[Call] 启动 VAD 监听')
+    await vad.start()
+  } else {
+    // VAD 未启用时，直接开始录音（兼容旧模式）
+    await startCallRecording()
+  }
 }
 
 // 结束语音通话
