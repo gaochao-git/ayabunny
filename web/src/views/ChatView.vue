@@ -882,8 +882,18 @@ watch(cameraPreviewRef, async (el) => {
                 muted
                 playsinline
                 class="w-full rounded-2xl shadow-lg bg-black"
-                style="transform: scaleX(-1);"
+                :style="{ transform: videoCapture.isFrontCamera.value ? 'scaleX(-1)' : 'none' }"
               ></video>
+              <!-- 切换摄像头按钮 -->
+              <button
+                @click.stop="videoCapture.switchCamera()"
+                class="absolute top-2 left-2 w-8 h-8 bg-black/50 hover:bg-black/70 text-white rounded-full flex items-center justify-center transition-colors"
+                title="切换摄像头"
+              >
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+              </button>
               <!-- 通话中红点 -->
               <div class="absolute top-2 right-2 w-4 h-4 bg-red-500 rounded-full border-2 border-white animate-pulse"></div>
               <!-- 点击挂断提示 -->
@@ -986,15 +996,27 @@ watch(cameraPreviewRef, async (el) => {
 
         <!-- 摄像头预览（非通话时） -->
         <div v-if="isCameraOn && !isInCall" class="mb-2 flex items-center gap-2 px-2">
-          <video
-            ref="cameraPreviewRef"
-            autoplay
-            muted
-            playsinline
-            class="w-20 h-16 object-cover rounded-lg border bg-black"
-            style="transform: scaleX(-1);"
-          ></video>
-          <span class="text-xs text-gray-400">摄像头已开启</span>
+          <div class="relative">
+            <video
+              ref="cameraPreviewRef"
+              autoplay
+              muted
+              playsinline
+              class="w-20 h-16 object-cover rounded-lg border bg-black"
+              :style="{ transform: videoCapture.isFrontCamera.value ? 'scaleX(-1)' : 'none' }"
+            ></video>
+            <!-- 切换摄像头按钮 -->
+            <button
+              @click="videoCapture.switchCamera()"
+              class="absolute -top-1 -right-1 w-5 h-5 bg-gray-600 hover:bg-gray-700 text-white rounded-full flex items-center justify-center transition-colors"
+              title="切换摄像头"
+            >
+              <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+            </button>
+          </div>
+          <span class="text-xs text-gray-400">{{ videoCapture.isFrontCamera.value ? '前置' : '后置' }}摄像头</span>
         </div>
 
         <!-- 隐藏的媒体输入（不设置 capture，让用户选择拍照或从相册选择） -->

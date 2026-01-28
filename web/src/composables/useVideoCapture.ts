@@ -23,6 +23,7 @@ export interface UseVideoCaptureReturn {
   isPreviewActive: Ref<boolean>
   isRecording: Ref<boolean>
   isStreaming: Ref<boolean>
+  isFrontCamera: Ref<boolean>
   duration: Ref<number>
   videoUrl: Ref<string | null>
 
@@ -34,6 +35,7 @@ export interface UseVideoCaptureReturn {
   startStreaming: (onFrame: (base64: string) => void) => void
   stopStreaming: () => void
   captureFrame: () => string | null
+  switchCamera: () => Promise<void>
 }
 
 export function useVideoCapture(options: UseVideoCaptureOptions = {}): UseVideoCaptureReturn {
@@ -52,6 +54,7 @@ export function useVideoCapture(options: UseVideoCaptureOptions = {}): UseVideoC
   const isPreviewActive = ref(false)
   const isRecording = ref(false)
   const isStreaming = ref(false)
+  const isFrontCamera = ref(true)  // 默认前置摄像头
   const duration = ref(0)
   const videoUrl = ref<string | null>(null)
 
@@ -78,7 +81,7 @@ export function useVideoCapture(options: UseVideoCaptureOptions = {}): UseVideoC
         video: {
           width: { ideal: resolution.width },
           height: { ideal: resolution.height },
-          facingMode: 'user'  // 前置摄像头
+          facingMode: isFrontCamera.value ? 'user' : 'environment'
         },
         audio: true  // 同时获取音频
       })
@@ -95,9 +98,46 @@ export function useVideoCapture(options: UseVideoCaptureOptions = {}): UseVideoC
       canvasCtx = canvas.getContext('2d')
 
       isPreviewActive.value = true
-      console.log('[VideoCapture] Preview started')
+      console.log('[VideoCapture] Preview started, front camera:', isFrontCamera.value)
     } catch (error) {
       console.error('[VideoCapture] Failed to start preview:', error)
+      throw error
+    }
+  }
+
+  /**
+   * 切换前后摄像头
+   */
+  async function switchCamera(): Promise<void> {
+    if (!videoElement || !isPreviewActive.value) {
+      return
+    }
+
+    // 停止当前流
+    if (mediaStream) {
+      mediaStream.getTracks().forEach(track => track.stop())
+    }
+
+    // 切换摄像头方向
+    isFrontCamera.value = !isFrontCamera.value
+
+    try {
+      mediaStream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          width: { ideal: resolution.width },
+          height: { ideal: resolution.height },
+          facingMode: isFrontCamera.value ? 'user' : 'environment'
+        },
+        audio: true
+      })
+
+      videoElement.srcObject = mediaStream
+      await videoElement.play()
+      console.log('[VideoCapture] Camera switched, front:', isFrontCamera.value)
+    } catch (error) {
+      console.error('[VideoCapture] Failed to switch camera:', error)
+      // 切换失败，恢复状态
+      isFrontCamera.value = !isFrontCamera.value
       throw error
     }
   }
@@ -292,6 +332,7 @@ export function useVideoCapture(options: UseVideoCaptureOptions = {}): UseVideoC
     isPreviewActive,
     isRecording,
     isStreaming,
+    isFrontCamera,
     duration,
     videoUrl,
     startPreview,
@@ -301,5 +342,6 @@ export function useVideoCapture(options: UseVideoCaptureOptions = {}): UseVideoC
     startStreaming,
     stopStreaming,
     captureFrame,
+    switchCamera,
   }
 }
