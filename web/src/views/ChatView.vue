@@ -826,7 +826,7 @@ watch(cameraPreviewRef, async (el) => {
         :class="{ 'hidden md:flex': showSettings }"
       >
         <!-- 头部 -->
-        <header class="flex-shrink-0 bg-gradient-to-r from-pink-300 via-rose-300 to-orange-300 px-4 h-14 flex items-center justify-between safe-top">
+        <header class="flex-shrink-0 bg-gradient-to-r from-pink-300 via-rose-300 to-orange-300 px-4 py-3 flex items-center justify-between safe-top">
           <div class="flex items-center gap-2">
             <span class="text-white text-lg font-semibold">{{ settings.assistantName || '小智' }}</span>
           </div>

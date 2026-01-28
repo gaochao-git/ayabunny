@@ -725,7 +725,7 @@ onUnmounted(() => {
     class="absolute inset-0 md:relative md:inset-auto w-full md:w-[480px] h-full flex-shrink-0 flex flex-col overflow-hidden bg-white z-20"
   >
     <!-- 头部标题 -->
-    <div class="flex-shrink-0 bg-gradient-to-r from-pink-300 via-rose-300 to-orange-300 px-4 h-14 flex items-center justify-between safe-top">
+    <div class="flex-shrink-0 bg-gradient-to-r from-pink-300 via-rose-300 to-orange-300 px-4 py-3 flex items-center justify-between safe-top">
       <div class="flex items-center gap-2">
         <!-- 手机端返回按钮 -->
         <button

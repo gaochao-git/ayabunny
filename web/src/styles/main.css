@@ -26,7 +26,21 @@ body {
 }
 
 .safe-top {
-  padding-top: env(safe-area-inset-top, 0px);
+  padding-top: max(env(safe-area-inset-top, 0px), constant(safe-area-inset-top, 0px));
+}
+
+/* PWA standalone 模式下的顶部安全区域 */
+@supports (padding-top: env(safe-area-inset-top)) {
+  .safe-top {
+    padding-top: env(safe-area-inset-top);
+  }
+}
+
+/* iOS PWA standalone 模式检测 */
+@media all and (display-mode: standalone) {
+  .safe-top {
+    padding-top: max(env(safe-area-inset-top, 44px), 44px);
+  }
 }
 
 /* 滚动条样式 */
