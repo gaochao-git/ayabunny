@@ -997,12 +997,11 @@ watch(cameraPreviewRef, async (el) => {
           <span class="text-xs text-gray-400">摄像头已开启</span>
         </div>
 
-        <!-- 隐藏的媒体输入 -->
+        <!-- 隐藏的媒体输入（不设置 capture，让用户选择拍照或从相册选择） -->
         <input
           ref="mediaInputRef"
           type="file"
           accept="image/*,video/*"
-          capture="environment"
           class="hidden"
           @change="handleMediaSelect"
         />
@@ -1020,15 +1019,15 @@ watch(cameraPreviewRef, async (el) => {
           />
 
           <!-- 按钮组：附件、摄像头、语音、通话、发送 -->
-          <div class="flex items-center gap-1 ml-2">
+          <div class="flex items-center gap-0.5 ml-1 flex-shrink-0">
             <!-- 附件按钮（图片/视频） -->
             <button
               @click="triggerMediaSelect"
               :disabled="chat.isLoading.value || isAnalyzingMedia"
-              class="w-9 h-9 rounded-full flex items-center justify-center transition-colors bg-green-500 hover:bg-green-600 text-white disabled:bg-gray-200 disabled:text-gray-400"
+              class="w-8 h-8 rounded-full flex items-center justify-center transition-colors bg-green-500 hover:bg-green-600 text-white disabled:bg-gray-200 disabled:text-gray-400"
               title="选择图片/视频"
             >
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
               </svg>
             </button>
@@ -1039,14 +1038,14 @@ watch(cameraPreviewRef, async (el) => {
               @click="toggleCamera"
               :disabled="chat.isLoading.value"
               :class="[
-                'w-9 h-9 rounded-full flex items-center justify-center transition-colors',
+                'w-8 h-8 rounded-full flex items-center justify-center transition-colors',
                 isCameraOn
                   ? 'bg-blue-500 hover:bg-blue-600 text-white'
                   : 'bg-gray-200 hover:bg-gray-300 text-gray-500'
               ]"
               :title="isCameraOn ? '关闭摄像头' : '开启摄像头'"
             >
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
               </svg>
             </button>
@@ -1056,18 +1055,18 @@ watch(cameraPreviewRef, async (el) => {
               @click="toggleTranscribe"
               :disabled="isTranscribing"
               :class="[
-                'w-9 h-9 rounded-full flex items-center justify-center transition-colors',
+                'w-8 h-8 rounded-full flex items-center justify-center transition-colors',
                 transcribeRecorder.isRecording.value
                   ? 'bg-red-500 text-white animate-pulse'
                   : 'bg-pink-500 hover:bg-pink-600 text-white'
               ]"
               :title="transcribeRecorder.isRecording.value ? '停止录音' : '语音输入'"
             >
-              <svg v-if="isTranscribing" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+              <svg v-if="isTranscribing" class="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
                 <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                 <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
               </svg>
-              <svg v-else class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg v-else class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
               </svg>
             </button>
@@ -1076,17 +1075,17 @@ watch(cameraPreviewRef, async (el) => {
             <button
               @click="toggleCall"
               :class="[
-                'w-9 h-9 rounded-full flex items-center justify-center transition-colors',
+                'w-8 h-8 rounded-full flex items-center justify-center transition-colors',
                 isInCall
                   ? 'bg-red-500 hover:bg-red-600 text-white'
                   : 'bg-gray-200 hover:bg-gray-300 text-gray-500'
               ]"
               :title="isInCall ? '挂断' : (isCameraOn ? '视频通话' : '语音通话')"
             >
-              <svg v-if="isInCall" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg v-if="isInCall" class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 8l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2M5 3a2 2 0 00-2 2v1c0 8.284 6.716 15 15 15h1a2 2 0 002-2v-3.28a1 1 0 00-.684-.948l-4.493-1.498a1 1 0 00-1.21.502l-1.13 2.257a11.042 11.042 0 01-5.516-5.517l2.257-1.128a1 1 0 00.502-1.21L9.228 3.683A1 1 0 008.279 3H5z" />
               </svg>
-              <svg v-else class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg v-else class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
               </svg>
             </button>
@@ -1096,7 +1095,7 @@ watch(cameraPreviewRef, async (el) => {
               @click="chat.isLoading.value ? chat.abort() : handleSend()"
               :disabled="!chat.isLoading.value && !canSend"
               :class="[
-                'w-9 h-9 rounded-full flex items-center justify-center transition-colors',
+                'w-8 h-8 rounded-full flex items-center justify-center transition-colors',
                 chat.isLoading.value
                   ? 'bg-blue-500 hover:bg-blue-600 text-white animate-breathing'
                   : canSend
@@ -1106,11 +1105,11 @@ watch(cameraPreviewRef, async (el) => {
               :title="chat.isLoading.value ? '停止生成' : '发送'"
             >
               <!-- 停止图标（方块） -->
-              <svg v-if="chat.isLoading.value" class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+              <svg v-if="chat.isLoading.value" class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
                 <rect x="6" y="6" width="12" height="12" rx="2" />
               </svg>
               <!-- 发送图标（上箭头） -->
-              <svg v-else class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg v-else class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 10l7-7m0 0l7 7m-7-7v18" />
               </svg>
             </button>
