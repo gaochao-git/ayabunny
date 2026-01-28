@@ -12,6 +12,32 @@ const props = defineProps<{
 
 const containerRef = ref<HTMLDivElement | null>(null)
 
+// 工具调用展开状态：key = messageId-toolIndex 或 streaming-toolIndex
+const expandedTools = ref<Set<string>>(new Set())
+
+// 切换工具展开/折叠
+function toggleTool(key: string) {
+  if (expandedTools.value.has(key)) {
+    expandedTools.value.delete(key)
+  } else {
+    expandedTools.value.add(key)
+  }
+}
+
+// 检查工具是否展开
+function isToolExpanded(key: string): boolean {
+  return expandedTools.value.has(key)
+}
+
+// 格式化 JSON 显示
+function formatJson(obj: unknown): string {
+  try {
+    return JSON.stringify(obj, null, 2)
+  } catch {
+    return String(obj)
+  }
+}
+
 // 自动滚动到底部
 watch(
   () => [props.messages.length, props.streamingContent],
@@ -38,7 +64,7 @@ watch(
       <!-- 助手消息 -->
       <div v-if="message.role === 'assistant'" class="flex flex-col">
         <span class="text-xs text-gray-400 mb-1 ml-1">小智</span>
-        <!-- 工具调用记录（调试用） -->
+        <!-- 工具调用记录（可折叠） -->
         <div
           v-if="message.toolCalls && message.toolCalls.length > 0"
           class="mb-2 max-w-[90%]"
@@ -46,18 +72,31 @@ watch(
           <div
             v-for="(tool, idx) in message.toolCalls"
             :key="idx"
-            class="bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 mb-1 text-xs"
+            class="bg-blue-50 border border-blue-200 rounded-lg overflow-hidden mb-1 text-xs"
           >
-            <div class="flex items-center gap-1 text-blue-600 font-medium">
+            <!-- 折叠头部（可点击） -->
+            <div
+              class="flex items-center gap-1 px-3 py-2 cursor-pointer hover:bg-blue-100 transition-colors"
+              @click="toggleTool(`${message.id}-${idx}`)"
+            >
+              <span class="text-gray-400 text-[10px] transition-transform" :class="{ 'rotate-90': isToolExpanded(`${message.id}-${idx}`) }">▶</span>
               <span>🔧</span>
-              <span>{{ tool.name }}</span>
-              <span class="text-blue-400">({{ tool.status === 'done' ? '完成' : '运行中' }})</span>
+              <span class="text-blue-600 font-medium">{{ tool.name }}</span>
+              <span class="text-green-500">✓</span>
+              <span class="text-gray-400 ml-auto text-[10px]">点击{{ isToolExpanded(`${message.id}-${idx}`) ? '收起' : '展开' }}</span>
             </div>
-            <div class="mt-1 text-gray-600">
-              <div><span class="text-gray-400">参数:</span> {{ JSON.stringify(tool.input) }}</div>
-              <div v-if="tool.output" class="mt-1">
-                <span class="text-gray-400">结果:</span>
-                <span class="text-green-600">{{ tool.output.slice(0, 100) }}{{ tool.output.length > 100 ? '...' : '' }}</span>
+            <!-- 展开内容 -->
+            <div
+              v-if="isToolExpanded(`${message.id}-${idx}`)"
+              class="px-3 py-2 border-t border-blue-200 bg-white/50"
+            >
+              <div class="text-gray-600 mb-2">
+                <div class="text-gray-400 mb-1">参数:</div>
+                <pre class="bg-gray-100 p-2 rounded text-[11px] overflow-x-auto whitespace-pre-wrap break-all">{{ formatJson(tool.input) }}</pre>
+              </div>
+              <div v-if="tool.output" class="text-gray-600">
+                <div class="text-gray-400 mb-1">结果:</div>
+                <pre class="bg-green-50 p-2 rounded text-[11px] overflow-x-auto whitespace-pre-wrap break-all text-green-700">{{ tool.output }}</pre>
               </div>
             </div>
           </div>
@@ -79,27 +118,43 @@ watch(
       </div>
     </div>
 
-    <!-- 正在进行的工具调用（流式时显示） -->
+    <!-- 正在进行的工具调用（流式时显示，可折叠） -->
     <div v-if="toolCalls && toolCalls.length > 0" class="flex flex-col message-enter">
       <span class="text-xs text-gray-400 mb-1 ml-1">小智</span>
       <div class="max-w-[90%]">
         <div
           v-for="(tool, idx) in toolCalls"
           :key="idx"
-          class="bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 mb-1 text-xs"
+          class="bg-blue-50 border border-blue-200 rounded-lg overflow-hidden mb-1 text-xs"
         >
-          <div class="flex items-center gap-1 text-blue-600 font-medium">
+          <!-- 折叠头部（可点击） -->
+          <div
+            class="flex items-center gap-1 px-3 py-2 cursor-pointer hover:bg-blue-100 transition-colors"
+            @click="toggleTool(`streaming-${idx}`)"
+          >
+            <span class="text-gray-400 text-[10px] transition-transform" :class="{ 'rotate-90': isToolExpanded(`streaming-${idx}`) }">▶</span>
             <span class="animate-spin" v-if="tool.status === 'running'">⚙️</span>
             <span v-else>🔧</span>
-            <span>{{ tool.name }}</span>
+            <span class="text-blue-600 font-medium">{{ tool.name }}</span>
             <span v-if="tool.status === 'running'" class="text-blue-400 animate-pulse">调用中...</span>
-            <span v-else class="text-green-500">✓ 完成</span>
+            <span v-else class="text-green-500">✓</span>
+            <span class="text-gray-400 ml-auto text-[10px]">点击{{ isToolExpanded(`streaming-${idx}`) ? '收起' : '展开' }}</span>
           </div>
-          <div class="mt-1 text-gray-600">
-            <div><span class="text-gray-400">参数:</span> {{ JSON.stringify(tool.input) }}</div>
-            <div v-if="tool.output" class="mt-1">
-              <span class="text-gray-400">结果:</span>
-              <span class="text-green-600">{{ tool.output.slice(0, 100) }}{{ tool.output.length > 100 ? '...' : '' }}</span>
+          <!-- 展开内容 -->
+          <div
+            v-if="isToolExpanded(`streaming-${idx}`)"
+            class="px-3 py-2 border-t border-blue-200 bg-white/50"
+          >
+            <div class="text-gray-600 mb-2">
+              <div class="text-gray-400 mb-1">参数:</div>
+              <pre class="bg-gray-100 p-2 rounded text-[11px] overflow-x-auto whitespace-pre-wrap break-all">{{ formatJson(tool.input) }}</pre>
+            </div>
+            <div v-if="tool.output" class="text-gray-600">
+              <div class="text-gray-400 mb-1">结果:</div>
+              <pre class="bg-green-50 p-2 rounded text-[11px] overflow-x-auto whitespace-pre-wrap break-all text-green-700">{{ tool.output }}</pre>
+            </div>
+            <div v-else-if="tool.status === 'running'" class="text-gray-400 italic">
+              等待结果...
             </div>
           </div>
         </div>

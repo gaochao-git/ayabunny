@@ -185,6 +185,7 @@ export function useChat() {
       isLoading.value = false
       streamingContent.value = ''
       currentSkill.value = null
+      toolCalls.value = []  // 清空工具调用记录（已保存到消息中）
       abortController = null
     }
   }

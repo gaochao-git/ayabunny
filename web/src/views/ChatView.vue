@@ -110,9 +110,11 @@ const getWakeWords = () => {
 
 // 通用的打断处理函数
 function handleVADSpeechStart() {
-  console.log('[VAD] 检测到用户说话，打断 TTS')
+  console.log('[VAD] 检测到用户说话')
+
+  // 场景1：TTS 正在播放 → 打断 TTS，开始录音
   if (ttsPlayer.isPlaying.value) {
-    // 停止 TTS 播放（会清空队列）
+    console.log('[VAD] 打断 TTS')
     ttsPlayer.stop()
     // 延迟一点再开始录音，避免捕获 TTS 尾音
     setTimeout(() => {
@@ -120,6 +122,22 @@ function handleVADSpeechStart() {
         startCallRecording()
       }
     }, 200)
+    return
+  }
+
+  // 场景2：儿歌正在播放（TTS 不播放）→ 降低音量，开始录音
+  if (musicPlayer.isPlaying.value) {
+    console.log('[VAD] 儿歌播放中，开始录音控制')
+    musicPlayer.duck()  // 降低儿歌音量，方便用户说话
+    if (isInCall.value && !callRecorder.isRecording.value && !isProcessingCall.value) {
+      startCallRecording()
+    }
+    return
+  }
+
+  // 场景3：其他情况（不应该发生，但保险起见）
+  if (isInCall.value && !callRecorder.isRecording.value && !isProcessingCall.value) {
+    startCallRecording()
   }
 }
 

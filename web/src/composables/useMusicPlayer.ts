@@ -19,9 +19,42 @@ const isPaused = ref(false)
 const isDucked = ref(false)  // 语音检测时降低音量
 const isUnlocked = ref(false)  // 是否已解锁自动播放
 
+// 复用同一个 Audio 对象，避免移动端自动播放策略问题
 let audio: HTMLAudioElement | null = null
 let normalVolume = 0.8
 const DUCK_VOLUME = 0.2  // 语音检测时的音量
+let currentOptions: MusicPlayerOptions = {}
+
+/**
+ * 获取或创建 Audio 对象
+ */
+function getAudio(): HTMLAudioElement {
+  if (!audio) {
+    audio = new Audio()
+    audio.volume = normalVolume
+
+    // 设置事件监听器（只设置一次）
+    audio.onended = () => {
+      console.log('[Music] 播放结束:', currentSong.value?.title)
+      isPlaying.value = false
+      isPaused.value = false
+      const song = currentSong.value
+      currentSong.value = null
+      currentOptions.onSongEnd?.()
+    }
+
+    audio.onerror = (e) => {
+      // 只在有 src 时才报错
+      if (audio?.src && audio.src !== window.location.href) {
+        console.error('[Music] 播放错误:', e)
+        isPlaying.value = false
+        isPaused.value = false
+        currentSong.value = null
+      }
+    }
+  }
+  return audio
+}
 
 /**
  * 加载歌曲列表
@@ -68,6 +101,12 @@ function getRandomSong(): Song | null {
 }
 
 export function useMusicPlayer(options: MusicPlayerOptions = {}) {
+  // 保存选项供回调使用
+  currentOptions = options
+
+  if (options.volume !== undefined) {
+    normalVolume = options.volume
+  }
 
   /**
    * 解锁音频播放（需要在用户交互时调用）
@@ -75,17 +114,23 @@ export function useMusicPlayer(options: MusicPlayerOptions = {}) {
   function unlock(): void {
     if (isUnlocked.value) return
 
-    // 创建一个静音的音频来解锁
-    const silentAudio = new Audio()
-    silentAudio.volume = 0
-    silentAudio.src = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA'
+    // 获取或创建 Audio 对象
+    const a = getAudio()
 
-    silentAudio.play().then(() => {
+    // 用静音播放来解锁
+    const originalVolume = a.volume
+    a.volume = 0
+    a.src = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA'
+
+    a.play().then(() => {
       isUnlocked.value = true
       console.log('[Music] 音频播放已解锁')
-      silentAudio.pause()
+      a.pause()
+      a.volume = originalVolume
+      a.src = ''
     }).catch(e => {
       console.log('[Music] 解锁失败（可能需要更多用户交互）:', e.message)
+      a.volume = originalVolume
     })
   }
 
@@ -95,37 +140,20 @@ export function useMusicPlayer(options: MusicPlayerOptions = {}) {
   function play(song: Song): void {
     console.log('[Music] 播放:', song.title)
 
-    // 停止当前播放（先移除事件处理器避免触发 onerror）
-    if (audio) {
-      audio.onerror = null
-      audio.onended = null
-      audio.pause()
-      audio.src = ''
-    }
+    const a = getAudio()
+
+    // 停止当前播放
+    a.pause()
 
     currentSong.value = song
-    audio = new Audio(getSongAudioUrl(song.file))
-    audio.volume = options.volume ?? normalVolume
+    a.src = getSongAudioUrl(song.file)
+    a.volume = isDucked.value ? DUCK_VOLUME : normalVolume
 
-    audio.onended = () => {
-      console.log('[Music] 播放结束:', song.title)
-      isPlaying.value = false
-      isPaused.value = false
-      currentSong.value = null
-      options.onSongEnd?.()
-    }
-
-    audio.onerror = (e) => {
-      console.error('[Music] 播放错误:', e)
-      isPlaying.value = false
-      isPaused.value = false
-      currentSong.value = null
-    }
-
-    audio.play().then(() => {
+    a.play().then(() => {
       isPlaying.value = true
       isPaused.value = false
       isUnlocked.value = true
+
       // 设置 Media Session
       if ('mediaSession' in navigator) {
         try {
@@ -147,6 +175,8 @@ export function useMusicPlayer(options: MusicPlayerOptions = {}) {
       }
     }).catch(e => {
       console.error('[Music] 播放失败:', e)
+      isPlaying.value = false
+      currentSong.value = null
     })
   }
 
@@ -193,7 +223,9 @@ export function useMusicPlayer(options: MusicPlayerOptions = {}) {
    */
   function resume(): void {
     if (audio && isPaused.value) {
-      audio.play()
+      audio.play().catch(e => {
+        console.error('[Music] 继续播放失败:', e)
+      })
       isPaused.value = false
       console.log('[Music] 继续播放')
     }
@@ -204,16 +236,13 @@ export function useMusicPlayer(options: MusicPlayerOptions = {}) {
    */
   function stop(): void {
     if (audio) {
-      // 先移除事件处理器，避免触发 onerror
-      audio.onerror = null
-      audio.onended = null
       audio.pause()
       audio.src = ''
-      audio = null
     }
     isPlaying.value = false
     isPaused.value = false
     currentSong.value = null
+
     // 清除 Media Session
     if ('mediaSession' in navigator) {
       try {
@@ -233,7 +262,7 @@ export function useMusicPlayer(options: MusicPlayerOptions = {}) {
    * 下一首
    */
   async function next(): Promise<Song | null> {
-    stop()
+    // 不调用 stop()，直接播放下一首（复用同一个 Audio 对象）
     return playSong()
   }
 
