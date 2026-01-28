@@ -111,6 +111,12 @@ watch(
       <!-- 用户消息 -->
       <div v-else class="flex justify-end">
         <div class="bg-gradient-to-r from-pink-400 to-orange-400 text-white rounded-2xl rounded-tr-sm px-4 py-3 max-w-[85%]">
+          <!-- 图片（如果有） -->
+          <img
+            v-if="message.image"
+            :src="message.image"
+            class="max-w-full max-h-48 rounded-lg mb-2"
+          />
           <p class="whitespace-pre-wrap text-sm leading-relaxed">
             {{ message.content }}
           </p>

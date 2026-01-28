@@ -18,6 +18,7 @@ export interface Message extends ChatMessage {
   id: string
   timestamp: number
   toolCalls?: ToolCall[]  // 工具调用记录
+  image?: string  // base64 图片（可选）
 }
 
 // 音乐控制动作
@@ -43,7 +44,7 @@ export function useChat() {
   let abortController: AbortController | null = null
 
   const history = computed<ChatMessage[]>(() =>
-    messages.value.map(({ role, content }) => ({ role, content }))
+    messages.value.map(({ role, content, image }) => ({ role, content, image }))
   )
 
   /**
@@ -56,12 +57,13 @@ export function useChat() {
   /**
    * 添加用户消息
    */
-  function addUserMessage(content: string): Message {
+  function addUserMessage(content: string, image?: string): Message {
     const message: Message = {
       id: generateId(),
       role: 'user',
       content,
       timestamp: Date.now(),
+      image,
     }
     messages.value.push(message)
     return message
@@ -85,8 +87,9 @@ export function useChat() {
    * 发送消息（流式）
    * @param content 用户消息
    * @param onSentence 可选回调，每当检测到完整句子时调用（用于流式 TTS）
+   * @param image 可选，base64 图片数据
    */
-  async function send(content: string, onSentence?: (sentence: string) => void): Promise<string> {
+  async function send(content: string, onSentence?: (sentence: string) => void, image?: string): Promise<string> {
     if (isLoading.value) return ''
 
     // 创建新的 AbortController
@@ -100,10 +103,11 @@ export function useChat() {
       maxTokens: settings.llmMaxTokens,
       assistantName: settings.assistantName,
       signal: abortController.signal,  // 传递 AbortSignal
+      image,  // 传递图片
     }
 
     // 添加用户消息
-    addUserMessage(content)
+    addUserMessage(content, image)
 
     isLoading.value = true
     streamingContent.value = ''

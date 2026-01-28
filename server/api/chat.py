@@ -10,7 +10,9 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from langchain_core.messages import HumanMessage, AIMessage
+from langchain_openai import ChatOpenAI
 from agent import get_agent
+from config import get_settings
 from agent.intent import (
     detect_intent_with_cache,
     StoryIntent, ListStoriesIntent,
@@ -26,6 +28,7 @@ class ChatMessage(BaseModel):
     """聊天消息"""
     role: str  # "user" | "assistant"
     content: str
+    image: str | None = None  # base64 图片（可选）
 
 
 class ChatRequest(BaseModel):
@@ -38,17 +41,40 @@ class ChatRequest(BaseModel):
     temperature: float | None = None
     max_tokens: int | None = None
     assistant_name: str | None = None  # 助手名字
+    image: str | None = None  # base64 图片（可选，用于图片问答）
 
 
-def build_messages(message: str, history: list[ChatMessage]) -> list:
-    """构建消息列表"""
+def build_messages(message: str, history: list[ChatMessage], image: str | None = None) -> list:
+    """构建消息列表（支持多模态）
+
+    Args:
+        message: 当前用户消息
+        history: 历史消息列表
+        image: base64 图片（可选）
+    """
     messages = []
     for msg in history:
         if msg.role == "user":
-            messages.append(HumanMessage(content=msg.content))
+            # 检查历史消息是否带图片
+            if msg.image:
+                messages.append(HumanMessage(content=[
+                    {"type": "text", "text": msg.content},
+                    {"type": "image_url", "image_url": {"url": msg.image}}
+                ]))
+            else:
+                messages.append(HumanMessage(content=msg.content))
         elif msg.role == "assistant":
             messages.append(AIMessage(content=msg.content))
-    messages.append(HumanMessage(content=message))
+
+    # 当前消息（可能带图片）
+    if image:
+        messages.append(HumanMessage(content=[
+            {"type": "text", "text": message},
+            {"type": "image_url", "image_url": {"url": image}}
+        ]))
+    else:
+        messages.append(HumanMessage(content=message))
+
     return messages
 
 
@@ -245,6 +271,64 @@ async def stream_list_songs_direct() -> AsyncGenerator[str, None]:
     yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
 
+async def stream_vision_response(
+    message: str,
+    image: str,
+    history: list[ChatMessage],
+    model: str,
+    temperature: float | None = None,
+    assistant_name: str | None = None,
+) -> AsyncGenerator[str, None]:
+    """
+    使用视觉模型流式回答图片问题（不使用工具）
+
+    Args:
+        message: 用户问题
+        image: base64 图片
+        history: 历史消息
+        model: 视觉模型名称
+        temperature: 温度参数
+        assistant_name: 助手名字
+    """
+    settings = get_settings()
+
+    # 创建视觉 LLM
+    llm = ChatOpenAI(
+        model=model,
+        openai_api_key=settings.OPENAI_API_KEY,
+        openai_api_base=settings.OPENAI_BASE_URL,
+        streaming=True,
+        temperature=temperature if temperature is not None else 0.7,
+    )
+
+    # 构建系统提示
+    name = assistant_name or "小智"
+    system_prompt = f"""你是一个友好的语音助手，名字叫"{name}"，专门为小朋友服务。
+你的特点：语言温柔、有耐心，善于用生动有趣的方式解释事物。
+现在用户给你发来了一张图片，请仔细观察并回答用户的问题。
+回答时要简洁明了，适合小朋友理解。"""
+
+    # 构建消息（带图片）
+    messages = build_messages(message, history, image)
+
+    # 在消息开头添加系统提示
+    from langchain_core.messages import SystemMessage
+    messages.insert(0, SystemMessage(content=system_prompt))
+
+    try:
+        # 流式生成
+        async for chunk in llm.astream(messages):
+            if chunk.content:
+                yield f"data: {json.dumps({'type': 'token', 'content': chunk.content}, ensure_ascii=False)}\n\n"
+
+        # 完成
+        yield f"data: {json.dumps({'type': 'done'})}\n\n"
+
+    except Exception as e:
+        print(f"[Vision] 错误: {e}")
+        yield f"data: {json.dumps({'type': 'error', 'message': str(e)}, ensure_ascii=False)}\n\n"
+
+
 async def stream_agent_response(
     message: str,
     history: list[ChatMessage],
@@ -252,6 +336,7 @@ async def stream_agent_response(
     temperature: float | None = None,
     max_tokens: int | None = None,
     assistant_name: str | None = None,
+    image: str | None = None,
 ) -> AsyncGenerator[str, None]:
     """
     流式生成 Agent 响应
@@ -265,7 +350,7 @@ async def stream_agent_response(
     - error: 发生错误
     """
     agent = get_agent(model=model, temperature=temperature, max_tokens=max_tokens, assistant_name=assistant_name)
-    messages = build_messages(message, history)
+    messages = build_messages(message, history, image)
 
     try:
         # 使用 astream_events 获取流式事件
@@ -348,6 +433,28 @@ async def chat(request: ChatRequest):
     """
     if not request.message.strip():
         raise HTTPException(status_code=400, detail="消息不能为空")
+
+    # 如果带图片，使用视觉模型直接回答（不需要工具）
+    if request.image:
+        settings = get_settings()
+        vision_model = settings.VISION_MODEL
+        print(f"[Chat] 带图片消息，使用视觉模型: {vision_model}")
+        return StreamingResponse(
+            stream_vision_response(
+                request.message,
+                request.image,
+                request.history,
+                model=vision_model,
+                temperature=request.temperature,
+                assistant_name=request.assistant_name,
+            ),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            }
+        )
 
     # Step 1: 意图识别
     intent = await detect_intent_with_cache(request.message, model=request.model)
@@ -466,6 +573,7 @@ async def chat(request: ChatRequest):
             temperature=request.temperature,
             max_tokens=request.max_tokens,
             assistant_name=request.assistant_name,
+            image=request.image,
         ),
         media_type="text/event-stream",
         headers={

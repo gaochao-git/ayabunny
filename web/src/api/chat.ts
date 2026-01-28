@@ -5,6 +5,7 @@
 export interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
+  image?: string  // base64 图片数据（可选）
 }
 
 export interface ChatEvent {
@@ -29,6 +30,7 @@ export interface ChatOptions {
   maxTokens?: number
   assistantName?: string  // 助手名字
   signal?: AbortSignal  // 用于取消请求
+  image?: string  // base64 图片（可选，用于图片问答）
 }
 
 /**
@@ -51,6 +53,7 @@ export async function* streamChat(
       temperature: options.temperature,
       max_tokens: options.maxTokens,
       assistant_name: options.assistantName,
+      image: options.image,  // base64 图片
     }),
     signal: options.signal,  // 传递 AbortSignal
   })

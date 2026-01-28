@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     OPENAI_BASE_URL: str = "https://api.siliconflow.cn/v1"
     OPENAI_MODEL: str = "Qwen/Qwen3-30B-A3B-Instruct-2507"
 
+    # 视觉模型配置（用于图片问答）
+    VISION_MODEL: str = "Qwen/Qwen2.5-VL-72B-Instruct"
+
     # ASR 配置 (SiliconFlow SenseVoice)
     ASR_BASE_URL: str = "https://api.siliconflow.cn/v1/audio/transcriptions"
     ASR_MODEL: str = "FunAudioLLM/SenseVoiceSmall"

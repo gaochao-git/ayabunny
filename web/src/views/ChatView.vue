@@ -57,6 +57,8 @@ const showSettings = ref(false)
 const isInCall = ref(false)       // 是否在通话中
 const isTranscribing = ref(false) // 是否正在语音转文字
 const isProcessingCall = ref(false) // 是否正在处理通话（防止并发）
+const pendingImage = ref<string | null>(null)  // 待发送的图片（base64）
+const imageInputRef = ref<HTMLInputElement | null>(null)  // 图片输入框引用
 
 // 当前选择的背景和头像
 const currentBackground = computed(() =>
@@ -406,7 +408,7 @@ watch(() => chat.musicAction.value, async (action) => {
 })
 
 // 计算属性
-const canSend = computed(() => inputText.value.trim() && !chat.isLoading.value)
+const canSend = computed(() => (inputText.value.trim() || pendingImage.value) && !chat.isLoading.value)
 
 // 状态文字（通话中显示）
 const statusText = computed(() => {
@@ -443,13 +445,72 @@ async function handleSend() {
   if (!canSend.value) return
 
   const text = inputText.value.trim()
+  const image = pendingImage.value
   inputText.value = ''
+  pendingImage.value = null  // 清空待发送图片
 
   // 用户交互时预加载 BGM（移动端需要在点击时预加载）
   bgm.preload()
 
-  // 文字模式不播放语音
-  await chat.send(text)
+  // 文字模式不播放语音（带图片）
+  await chat.send(text, undefined, image || undefined)
+}
+
+// 处理图片选择
+function handleImageSelect(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+
+  // 压缩并转 base64
+  const reader = new FileReader()
+  reader.onload = (e) => {
+    const img = new Image()
+    img.onload = () => {
+      // 压缩图片（最大 800px）
+      const maxSize = 800
+      let { width, height } = img
+      if (width > maxSize || height > maxSize) {
+        if (width > height) {
+          height = (height / width) * maxSize
+          width = maxSize
+        } else {
+          width = (width / height) * maxSize
+          height = maxSize
+        }
+      }
+
+      const canvas = document.createElement('canvas')
+      canvas.width = width
+      canvas.height = height
+      const ctx = canvas.getContext('2d')!
+      ctx.drawImage(img, 0, 0, width, height)
+
+      // 转为 base64（JPEG 格式，质量 0.8）
+      const base64 = canvas.toDataURL('image/jpeg', 0.8)
+      pendingImage.value = base64
+
+      // 如果输入框为空，添加默认提示
+      if (!inputText.value.trim()) {
+        inputText.value = '这是什么？'
+      }
+    }
+    img.src = e.target?.result as string
+  }
+  reader.readAsDataURL(file)
+
+  // 重置 input
+  input.value = ''
+}
+
+// 清除待发送图片
+function clearPendingImage() {
+  pendingImage.value = null
+}
+
+// 触发图片选择
+function triggerImageSelect() {
+  imageInputRef.value?.click()
 }
 
 // 语音转文字（填充到输入框）
@@ -780,6 +841,32 @@ function clearChat() {
           说完自动识别 | 点击头像挂断
         </div>
 
+        <!-- 待发送图片预览 -->
+        <div v-if="pendingImage" class="mb-2 flex items-center gap-2 px-2">
+          <div class="relative">
+            <img :src="pendingImage" class="w-16 h-16 object-cover rounded-lg border" />
+            <button
+              @click="clearPendingImage"
+              class="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center text-xs hover:bg-red-600"
+            >
+              <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+          <span class="text-xs text-gray-400">图片已选择</span>
+        </div>
+
+        <!-- 隐藏的图片输入 -->
+        <input
+          ref="imageInputRef"
+          type="file"
+          accept="image/*"
+          capture="environment"
+          class="hidden"
+          @change="handleImageSelect"
+        />
+
         <!-- 输入框（按钮在内部） -->
         <div class="relative flex items-center bg-gray-50 border border-gray-200 rounded-full px-4 py-2 focus-within:ring-2 focus-within:ring-pink-400 focus-within:border-transparent">
           <input
@@ -794,6 +881,19 @@ function clearChat() {
 
           <!-- 按钮组 -->
           <div class="flex items-center gap-1 ml-2">
+            <!-- 拍照按钮 -->
+            <button
+              @click="triggerImageSelect"
+              :disabled="chat.isLoading.value"
+              class="w-9 h-9 rounded-full flex items-center justify-center transition-colors bg-green-500 hover:bg-green-600 text-white disabled:bg-gray-200 disabled:text-gray-400"
+              title="拍照问答"
+            >
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
+            </button>
+
             <!-- 语音转文字按钮 -->
             <button
               @click="toggleTranscribe"
