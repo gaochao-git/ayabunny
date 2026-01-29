@@ -6,6 +6,7 @@
  */
 
 import { ref, onUnmounted } from 'vue'
+import { FUNASR_WS_URL } from '@/api/config'
 
 export interface FunASRVADOptions {
   /** FunASR WebSocket 地址 */
@@ -26,7 +27,7 @@ export interface FunASRVADOptions {
 
 export function useFunASRVAD(options: FunASRVADOptions = {}) {
   const {
-    wsUrl = 'ws://127.0.0.1:10096',
+    wsUrl = FUNASR_WS_URL,
     onSpeechStart,
     onSpeechEnd,
     onWakeWordDetected,

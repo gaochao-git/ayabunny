@@ -103,12 +103,6 @@ export function useBGM(options: BGMOptions = {}) {
   function unlock(): void {
     if (unlockedAudio) {
       console.log('[BGM] 已经解锁过了')
-      // 如果有待播放的 BGM，现在播放
-      if (pendingBgmId !== null) {
-        const bgmId = pendingBgmId
-        pendingBgmId = null
-        play(bgmId)
-      }
       return
     }
 
@@ -126,13 +120,8 @@ export function useBGM(options: BGMOptions = {}) {
       audio.currentTime = 0
       unlockedAudio = audio
       console.log('[BGM] 音频已解锁，预加载:', track.title)
-
-      // 如果有待播放的 BGM，现在播放
-      if (pendingBgmId !== null) {
-        const bgmId = pendingBgmId
-        pendingBgmId = null
-        play(bgmId)
-      }
+      // 清除挂起的 BGM，不自动播放
+      pendingBgmId = null
     }).catch(e => {
       console.warn('[BGM] 解锁失败:', e)
     })

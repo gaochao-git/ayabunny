@@ -12,6 +12,7 @@ import { useVideoCapture } from '@/composables/useVideoCapture'
 import { useSettingsStore, BACKGROUNDS, AVATARS, type AvatarType } from '@/stores/settings'
 import { transcribe } from '@/api/asr'
 import { analyzeFrame, analyzeFrames, analyzeVideo } from '@/api/video'
+import { FUNASR_WS_URL } from '@/api/config'
 import ChatArea from '@/components/ChatArea.vue'
 import RightPanel from '@/components/RightPanel.vue'
 import Avatar3D from '@/components/Avatar3D.vue'
@@ -66,6 +67,7 @@ const mediaInputRef = ref<HTMLInputElement | null>(null)
 // 摄像头状态（独立开关）
 const isCameraOn = ref(false)
 const cameraPreviewRef = ref<HTMLVideoElement | null>(null)
+const isAvatarMain = ref(true)  // AI角色是否为主画面（true=AI主/摄像头辅，false=摄像头主/AI辅）
 const isAnalyzingMedia = ref(false)  // 是否正在分析媒体
 
 // 视频捕获
@@ -219,7 +221,7 @@ const sileroVAD = useSileroVAD({
 
 // FunASR VAD（基于服务端 AI 模型 + 中断词验证）
 const funasrVAD = useFunASRVAD({
-  wsUrl: 'ws://127.0.0.1:10096',  // FunASR 流式服务 WebSocket 地址
+  wsUrl: FUNASR_WS_URL,  // FunASR 流式服务 WebSocket 地址
   ignoreTime: () => settings.vadIgnoreTime,
   wakeWords: getWakeWords,  // 中断词列表（动态获取，包含助手名字）
   transcribeFn: transcribeForWakeWord,  // ASR 识别函数
@@ -798,13 +800,26 @@ async function toggleCamera() {
 }
 
 // 监听摄像头预览元素变化
-watch(cameraPreviewRef, async (el) => {
-  if (el && isCameraOn.value && !videoCapture.isPreviewActive.value) {
-    try {
-      await videoCapture.startPreview(el)
-    } catch (error) {
-      console.error('[Camera] Auto start failed:', error)
-      isCameraOn.value = false
+watch(cameraPreviewRef, async (el, oldEl) => {
+  if (el && isCameraOn.value) {
+    // 如果预览未启动，启动预览
+    if (!videoCapture.isPreviewActive.value) {
+      try {
+        await videoCapture.startPreview(el)
+      } catch (error) {
+        console.error('[Camera] Auto start failed:', error)
+        isCameraOn.value = false
+      }
+    } else if (el !== oldEl) {
+      // 如果预览已启动但元素变了（切换了位置），重新连接流
+      console.log('[Camera] Video element changed, reconnecting stream...')
+      videoCapture.stopPreview()
+      try {
+        await videoCapture.startPreview(el)
+      } catch (error) {
+        console.error('[Camera] Reconnect failed:', error)
+        isCameraOn.value = false
+      }
     }
   }
 })
@@ -876,49 +891,71 @@ watch(cameraPreviewRef, async (el) => {
 
       <!-- 主内容区 - 根据模式显示不同内容 -->
       <div class="flex-1 min-h-0 flex flex-col">
-        <!-- 通话中：显示角色头像或摄像头预览 -->
+        <!-- 通话中：显示角色头像和/或摄像头预览 -->
         <template v-if="isInCall">
-          <div class="flex-1 flex flex-col items-center justify-center pb-16 bg-gradient-to-b from-white/50 to-white">
-            <!-- 摄像头预览（摄像头开启时） -->
-            <div v-if="isCameraOn" class="relative w-full max-w-sm mx-auto cursor-pointer" @click="toggleCall">
+          <div class="flex-1 flex flex-col items-center justify-center pb-16 bg-gradient-to-b from-white/50 to-white relative">
+
+            <!-- 摄像头视频（单一元素，通过CSS切换位置） -->
+            <div
+              v-if="isCameraOn"
+              class="transition-all duration-300 ease-in-out rounded-2xl overflow-hidden shadow-lg bg-black"
+              :class="isAvatarMain
+                ? 'absolute top-4 right-4 w-20 h-28 cursor-pointer z-20 border-2 border-white hover:scale-105'
+                : 'w-72 h-96'"
+              @click.stop="isAvatarMain && (isAvatarMain = false)"
+            >
               <video
                 ref="cameraPreviewRef"
                 autoplay
                 muted
                 playsinline
-                class="w-full rounded-2xl shadow-lg bg-black"
+                class="w-full h-full object-cover"
                 :style="{ transform: videoCapture.isFrontCamera.value ? 'scaleX(-1)' : 'none' }"
               ></video>
-              <!-- 切换摄像头按钮 -->
+              <!-- 小窗时：切换提示图标 -->
+              <div v-if="isAvatarMain" class="absolute inset-0 flex items-center justify-center bg-black/20 opacity-0 hover:opacity-100 transition-opacity">
+                <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+                </svg>
+              </div>
+              <!-- 小窗时：切换摄像头按钮 -->
               <button
+                v-if="isAvatarMain"
                 @click.stop="videoCapture.switchCamera()"
-                class="absolute top-2 left-2 w-8 h-8 bg-black/50 hover:bg-black/70 text-white rounded-full flex items-center justify-center transition-colors"
-                title="切换摄像头"
+                class="absolute bottom-1 right-1 w-5 h-5 bg-black/50 text-white rounded-full flex items-center justify-center"
+                title="切换前后摄像头"
               >
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                 </svg>
               </button>
-              <!-- 通话中红点 -->
-              <div class="absolute top-2 right-2 w-4 h-4 bg-red-500 rounded-full border-2 border-white animate-pulse"></div>
-              <!-- 点击挂断提示 -->
-              <div class="absolute bottom-2 left-1/2 -translate-x-1/2 text-white text-xs bg-black/50 px-2 py-1 rounded">
-                点击挂断
-              </div>
+              <!-- 主画面时：通话中红点 -->
+              <div v-if="!isAvatarMain" class="absolute top-2 right-2 w-4 h-4 bg-red-500 rounded-full border-2 border-white animate-pulse"></div>
             </div>
-            <!-- 3D 角色区域（摄像头关闭时） -->
-            <div v-else class="relative cursor-pointer" @click="toggleCall">
-              <!-- 3D 宠物 -->
+
+            <!-- AI角色（单一元素，通过CSS切换位置） -->
+            <div
+              class="transition-all duration-300 ease-in-out"
+              :class="isCameraOn && !isAvatarMain
+                ? 'absolute top-4 right-4 w-20 h-28 cursor-pointer z-20 rounded-xl overflow-hidden shadow-lg border-2 border-white bg-gradient-to-b from-pink-50 to-white flex items-center justify-center hover:scale-105'
+                : 'relative'"
+              @click.stop="isCameraOn && !isAvatarMain && (isAvatarMain = true)"
+            >
               <Avatar3D
                 :type="mascotType"
                 :is-listening="callRecorder.isRecording.value"
                 :is-thinking="chat.isLoading.value"
                 :is-speaking="ttsPlayer.isPlaying.value"
-                :size="280"
+                :size="isCameraOn && !isAvatarMain ? 70 : 280"
               />
-
-              <!-- 通话中红点 -->
-              <div class="absolute top-0 right-4 w-5 h-5 bg-red-500 rounded-full border-2 border-white animate-pulse z-10"></div>
+              <!-- 小窗时：切换提示图标 -->
+              <div v-if="isCameraOn && !isAvatarMain" class="absolute inset-0 flex items-center justify-center bg-black/20 opacity-0 hover:opacity-100 transition-opacity rounded-xl">
+                <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+                </svg>
+              </div>
+              <!-- 主画面时：通话中红点 -->
+              <div v-if="!isCameraOn || isAvatarMain" class="absolute top-0 right-4 w-5 h-5 bg-red-500 rounded-full border-2 border-white animate-pulse z-10"></div>
             </div>
 
             <!-- 状态指示 -->

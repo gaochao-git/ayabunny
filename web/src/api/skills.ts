@@ -4,6 +4,8 @@
  * 支持 Agent Skills 规范的渐进加载
  */
 
+import { getApiUrl } from './config'
+
 export interface SkillSummary {
   id: string
   name: string
@@ -38,7 +40,7 @@ export interface Story {
  * 获取所有技能列表（只返回摘要，支持渐进加载）
  */
 export async function getSkills(): Promise<SkillSummary[]> {
-  const response = await fetch('/api/skills')
+  const response = await fetch(getApiUrl('/api/skills'))
   if (!response.ok) {
     throw new Error(`HTTP error! status: ${response.status}`)
   }
@@ -50,7 +52,7 @@ export async function getSkills(): Promise<SkillSummary[]> {
  * 获取技能完整内容（按需加载）
  */
 export async function getSkill(skillId: string): Promise<SkillDetail> {
-  const response = await fetch(`/api/skills/${skillId}`)
+  const response = await fetch(getApiUrl(`/api/skills/${skillId}`))
   if (!response.ok) {
     throw new Error(`HTTP error! status: ${response.status}`)
   }
@@ -61,7 +63,7 @@ export async function getSkill(skillId: string): Promise<SkillDetail> {
  * 重新加载技能（开发调试用）
  */
 export async function reloadSkills(): Promise<{ count: number; skills: string[] }> {
-  const response = await fetch('/api/skills/reload', { method: 'POST' })
+  const response = await fetch(getApiUrl('/api/skills/reload'), { method: 'POST' })
   if (!response.ok) {
     throw new Error(`HTTP error! status: ${response.status}`)
   }
@@ -72,7 +74,7 @@ export async function reloadSkills(): Promise<{ count: number; skills: string[] 
  * 获取故事列表
  */
 export async function getStories(skillId: string): Promise<Story[]> {
-  const response = await fetch(`/api/skills/${skillId}/stories`)
+  const response = await fetch(getApiUrl(`/api/skills/${skillId}/stories`))
   if (!response.ok) {
     throw new Error(`HTTP error! status: ${response.status}`)
   }
@@ -84,7 +86,7 @@ export async function getStories(skillId: string): Promise<Story[]> {
  * 获取故事详情
  */
 export async function getStory(skillId: string, storyId: string): Promise<Story> {
-  const response = await fetch(`/api/skills/${skillId}/stories/${storyId}`)
+  const response = await fetch(getApiUrl(`/api/skills/${skillId}/stories/${storyId}`))
   if (!response.ok) {
     throw new Error(`HTTP error! status: ${response.status}`)
   }
@@ -98,7 +100,7 @@ export async function createStory(
   skillId: string,
   story: { title: string; content: string; category?: string; bgm?: string | null }
 ): Promise<Story> {
-  const response = await fetch(`/api/skills/${skillId}/stories`, {
+  const response = await fetch(getApiUrl(`/api/skills/${skillId}/stories`), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -119,7 +121,7 @@ export async function updateStory(
   storyId: string,
   story: { title?: string; content?: string; category?: string; bgm?: string | null }
 ): Promise<Story> {
-  const response = await fetch(`/api/skills/${skillId}/stories/${storyId}`, {
+  const response = await fetch(getApiUrl(`/api/skills/${skillId}/stories/${storyId}`), {
     method: 'PUT',
     headers: {
       'Content-Type': 'application/json',
@@ -136,7 +138,7 @@ export async function updateStory(
  * 删除故事
  */
 export async function deleteStory(skillId: string, storyId: string): Promise<void> {
-  const response = await fetch(`/api/skills/${skillId}/stories/${storyId}`, {
+  const response = await fetch(getApiUrl(`/api/skills/${skillId}/stories/${storyId}`), {
     method: 'DELETE',
   })
   if (!response.ok) {
@@ -151,7 +153,7 @@ export async function generateStory(
   skillId: string,
   title: string
 ): Promise<{ title: string; content: string }> {
-  const response = await fetch(`/api/skills/${skillId}/stories/generate`, {
+  const response = await fetch(getApiUrl(`/api/skills/${skillId}/stories/generate`), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

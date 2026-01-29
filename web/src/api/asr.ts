@@ -2,6 +2,7 @@
  * ASR 语音识别 API
  */
 
+import { getApiUrl } from './config'
 import { useSettingsStore, type ASRService } from '@/stores/settings'
 
 export interface ASRResult {
@@ -36,7 +37,7 @@ export async function transcribe(audioBlob: Blob, service?: ASRService): Promise
 
   console.log(`[ASR] 使用 ${asrService} 服务: ${endpoint}`)
 
-  const response = await fetch(endpoint, {
+  const response = await fetch(getApiUrl(endpoint), {
     method: 'POST',
     body: formData,
   })
@@ -53,7 +54,7 @@ export async function transcribe(audioBlob: Blob, service?: ASRService): Promise
  */
 export async function checkASRHealth(): Promise<boolean> {
   try {
-    const response = await fetch('/api/asr/health')
+    const response = await fetch(getApiUrl('/api/asr/health'))
     const data = await response.json()
     return data.status === 'healthy'
   } catch {

@@ -2,6 +2,8 @@
  * TTS 语音合成 API - SiliconFlow IndexTTS-2 云端 + 音色克隆
  */
 
+import { getApiUrl } from './config'
+
 export interface TTSOptions {
   text: string
   model?: string  // TTS 模型: IndexTeam/IndexTTS-2 或 FunAudioLLM/CosyVoice2-0.5B
@@ -23,7 +25,7 @@ export interface CustomVoice {
  * 文字转语音
  */
 export async function synthesize(options: TTSOptions): Promise<ArrayBuffer> {
-  const response = await fetch('/api/tts/synthesize', {
+  const response = await fetch(getApiUrl('/api/tts/synthesize'), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -49,7 +51,7 @@ export async function synthesize(options: TTSOptions): Promise<ArrayBuffer> {
  */
 export async function checkTTSHealth(): Promise<boolean> {
   try {
-    const response = await fetch('/api/tts/health')
+    const response = await fetch(getApiUrl('/api/tts/health'))
     const data = await response.json()
     return data.status === 'healthy'
   } catch {
@@ -63,7 +65,7 @@ export async function checkTTSHealth(): Promise<boolean> {
  * 获取所有自定义音色
  */
 export async function getCustomVoices(): Promise<CustomVoice[]> {
-  const response = await fetch('/api/tts/voices')
+  const response = await fetch(getApiUrl('/api/tts/voices'))
   if (!response.ok) {
     throw new Error(`Failed to get voices: ${response.status}`)
   }
@@ -84,7 +86,7 @@ export async function createCustomVoice(
   formData.append('name', name)
   formData.append('description', description)
 
-  const response = await fetch('/api/tts/voices', {
+  const response = await fetch(getApiUrl('/api/tts/voices'), {
     method: 'POST',
     body: formData,
   })
@@ -102,7 +104,7 @@ export async function createCustomVoice(
  * 删除自定义音色
  */
 export async function deleteCustomVoice(voiceId: string): Promise<void> {
-  const response = await fetch(`/api/tts/voices/${voiceId}`, {
+  const response = await fetch(getApiUrl(`/api/tts/voices/${voiceId}`), {
     method: 'DELETE',
   })
 
@@ -118,7 +120,7 @@ export async function testCustomVoice(
   voiceId: string,
   text: string = '你好，这是一段测试语音。'
 ): Promise<ArrayBuffer> {
-  const response = await fetch(`/api/tts/voices/${voiceId}/test`, {
+  const response = await fetch(getApiUrl(`/api/tts/voices/${voiceId}/test`), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -137,5 +139,5 @@ export async function testCustomVoice(
  * 获取音色参考音频 URL
  */
 export function getVoiceAudioUrl(voiceId: string): string {
-  return `/api/tts/voices/${voiceId}/audio`
+  return getApiUrl(`/api/tts/voices/${voiceId}/audio`)
 }

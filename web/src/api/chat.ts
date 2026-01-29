@@ -2,6 +2,8 @@
  * 对话 API
  */
 
+import { getApiUrl } from './config'
+
 export interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
@@ -41,7 +43,7 @@ export async function* streamChat(
   history: ChatMessage[] = [],
   options: ChatOptions = {}
 ): AsyncGenerator<ChatEvent> {
-  const response = await fetch('/api/chat', {
+  const response = await fetch(getApiUrl('/api/chat'), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -99,7 +101,7 @@ export async function sendChat(
   history: ChatMessage[] = [],
   options: ChatOptions = {}
 ): Promise<string> {
-  const response = await fetch('/api/chat/simple', {
+  const response = await fetch(getApiUrl('/api/chat/simple'), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

@@ -2,6 +2,8 @@
  * 儿歌 API
  */
 
+import { getApiUrl } from './config'
+
 export interface Song {
   id: string
   title: string
@@ -14,7 +16,7 @@ export interface Song {
  * 获取儿歌列表
  */
 export async function getSongs(): Promise<Song[]> {
-  const response = await fetch('/api/songs')
+  const response = await fetch(getApiUrl('/api/songs'))
   if (!response.ok) {
     throw new Error(`HTTP error! status: ${response.status}`)
   }
@@ -26,7 +28,7 @@ export async function getSongs(): Promise<Song[]> {
  * 获取歌曲音频 URL
  */
 export function getSongAudioUrl(filename: string): string {
-  return `/api/songs/audio/${filename}`
+  return getApiUrl(`/api/songs/audio/${filename}`)
 }
 
 /**
@@ -46,7 +48,7 @@ export async function uploadSong(
     formData.append('keywords', keywords.join(','))
   }
 
-  const response = await fetch('/api/songs/upload', {
+  const response = await fetch(getApiUrl('/api/songs/upload'), {
     method: 'POST',
     body: formData,
   })
@@ -63,7 +65,7 @@ export async function uploadSong(
  * 删除儿歌
  */
 export async function deleteSong(songId: string): Promise<void> {
-  const response = await fetch(`/api/songs/${songId}`, {
+  const response = await fetch(getApiUrl(`/api/songs/${songId}`), {
     method: 'DELETE',
   })
 

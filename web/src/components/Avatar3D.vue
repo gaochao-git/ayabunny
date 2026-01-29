@@ -1,16 +1,25 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch } from 'vue'
 import * as THREE from 'three'
+import { Motion } from '@capacitor/motion'
 
 type MascotType = 'rabbit' | 'bear' | 'cat' | 'dino' | 'panda'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   type?: MascotType
   isListening?: boolean
   isThinking?: boolean
   isSpeaking?: boolean
   size?: number
-}>()
+  /** 是否启用运动感应 */
+  motionEnabled?: boolean
+  /** 运动灵敏度 */
+  motionSensitivity?: number
+}>(), {
+  type: 'rabbit',
+  motionEnabled: true,
+  motionSensitivity: 0.05
+})
 
 const containerRef = ref<HTMLDivElement | null>(null)
 
@@ -24,9 +33,25 @@ let earsGroup: THREE.Group | null = null
 let mouthGroup: THREE.Group | null = null
 let mainLight: THREE.PointLight | null = null
 let frameId: number | null = null
+let leftEye: THREE.Group | null = null
+let rightEye: THREE.Group | null = null
+let lastBlinkTime = 0  // 上次眨眼时间
 
 const targetRotation = { x: 0, y: 0 }
 const currentRotation = { x: 0, y: 0 }
+
+// 运动感应相关
+let motionListening = false
+const motionOffset = { x: 0, y: 0 }  // 加速度偏移
+const motionScale = ref(1)           // 晃动时的缩放
+const isShaking = ref(false)         // 是否在剧烈晃动
+
+// 调试信息（可在界面显示）
+const debugInfo = ref({
+  status: '未启动',
+  accel: { x: 0, y: 0, z: 0 },
+  delta: 0
+})
 
 function getMaterial(color: number) {
   return new THREE.MeshPhysicalMaterial({
@@ -133,7 +158,9 @@ function setupMascot(type: MascotType) {
     eyeWrap.position.set(x, 0.1, 1.05)
     return eyeWrap
   }
-  headGroup.add(createEye(-0.48), createEye(0.48))
+  leftEye = createEye(-0.48)
+  rightEye = createEye(0.48)
+  headGroup.add(leftEye, rightEye)
 
   // Blush
   const blushGeom = new THREE.CircleGeometry(0.22, 32)
@@ -309,6 +336,183 @@ function onTouchMove(e: TouchEvent) {
   mainLight.position.y = 4 + y * 2
 }
 
+// ========== 运动感应 ==========
+let lastAccel = { x: 0, y: 0, z: 0 }
+let shakeTimeout: ReturnType<typeof setTimeout> | null = null
+
+function handleMotionData(accel: { x: number; y: number; z: number }) {
+  const sensitivity = props.motionSensitivity ?? 0.15
+
+  // 计算加速度变化量（检测晃动强度）
+  const deltaX = accel.x - lastAccel.x
+  const deltaY = accel.y - lastAccel.y
+  const deltaZ = accel.z - lastAccel.z
+  const totalDelta = Math.sqrt(deltaX * deltaX + deltaY * deltaY + deltaZ * deltaZ)
+
+  lastAccel = { ...accel }
+
+  // 更新调试信息
+  debugInfo.value = {
+    status: '运动中',
+    accel: {
+      x: Math.round(accel.x * 100) / 100,
+      y: Math.round(accel.y * 100) / 100,
+      z: Math.round(accel.z * 100) / 100
+    },
+    delta: Math.round(totalDelta * 100) / 100
+  }
+
+  // 根据加速度设置目标旋转（带阻尼）
+  const dampingFactor = 0.3
+  motionOffset.x += (accel.y * sensitivity - motionOffset.x) * dampingFactor
+  motionOffset.y += (accel.x * sensitivity - motionOffset.y) * dampingFactor
+
+  // 限制偏移范围
+  motionOffset.x = Math.max(-0.5, Math.min(0.5, motionOffset.x))
+  motionOffset.y = Math.max(-0.5, Math.min(0.5, motionOffset.y))
+
+  // 更新目标旋转
+  targetRotation.x = motionOffset.x
+  targetRotation.y = motionOffset.y
+
+  // 检测剧烈晃动
+  if (totalDelta > 8) {
+    isShaking.value = true
+    motionScale.value = 1.1
+    // 重置晃动状态
+    if (shakeTimeout) clearTimeout(shakeTimeout)
+    shakeTimeout = setTimeout(() => {
+      isShaking.value = false
+      motionScale.value = 1
+    }, 500)
+  } else if (totalDelta > 3) {
+    motionScale.value = 1.05
+    if (shakeTimeout) clearTimeout(shakeTimeout)
+    shakeTimeout = setTimeout(() => {
+      motionScale.value = 1
+    }, 300)
+  }
+}
+
+let motionLogCount = 0
+function handleDeviceMotion(event: DeviceMotionEvent) {
+  const accel = event.accelerationIncludingGravity || event.acceleration
+  if (accel && accel.x !== null && accel.y !== null) {
+    // 每 30 次打印一次日志，避免刷屏
+    if (motionLogCount++ % 30 === 0) {
+      console.log('[Avatar3D] 收到运动数据:', accel.x?.toFixed(2), accel.y?.toFixed(2), accel.z?.toFixed(2))
+    }
+    handleMotionData({
+      x: accel.x || 0,
+      y: accel.y || 0,
+      z: accel.z || 0
+    })
+  }
+}
+
+function handleCapacitorMotion(event: any) {
+  const accel = event.acceleration || { x: 0, y: 0, z: 0 }
+  handleMotionData(accel)
+}
+
+async function startMotionListening() {
+  console.log('[Avatar3D] startMotionListening 开始, motionEnabled =', props.motionEnabled)
+
+  if (motionListening) {
+    console.log('[Avatar3D] 已经在监听了')
+    debugInfo.value.status = '已在监听中'
+    return
+  }
+
+  if (!props.motionEnabled) {
+    console.log('[Avatar3D] motionEnabled 为 false 或未启用')
+    debugInfo.value.status = '运动感应已禁用'
+    return
+  }
+
+  debugInfo.value.status = '正在启动...'
+
+  try {
+    // iOS 必须在用户手势中直接调用权限请求，不能有任何 await 在前面
+    // 所以优先处理 Web DeviceMotion API
+    console.log('[Avatar3D] 检查 DeviceMotionEvent:', typeof DeviceMotionEvent)
+    if (typeof DeviceMotionEvent !== 'undefined') {
+      // iOS 13+ 需要请求权限
+      const hasRequestPermission = typeof (DeviceMotionEvent as any).requestPermission === 'function'
+      console.log('[Avatar3D] 需要请求权限:', hasRequestPermission)
+
+      if (hasRequestPermission) {
+        try {
+          debugInfo.value.status = '请求 iOS 运动权限...'
+          console.log('[Avatar3D] 调用 DeviceMotionEvent.requestPermission')
+          // 这必须是点击事件处理中的第一个 await
+          const permission = await (DeviceMotionEvent as any).requestPermission()
+          console.log('[Avatar3D] 权限结果:', permission)
+          if (permission !== 'granted') {
+            console.warn('[Avatar3D] 运动权限被拒绝')
+            debugInfo.value.status = '权限被拒绝: ' + permission
+            return
+          }
+        } catch (e) {
+          console.log('[Avatar3D] 权限请求异常:', e)
+          debugInfo.value.status = '权限请求失败: ' + String(e)
+          return
+        }
+      }
+
+      console.log('[Avatar3D] 添加 devicemotion 事件监听')
+      window.addEventListener('devicemotion', handleDeviceMotion)
+      motionListening = true
+      debugInfo.value.status = 'Web Motion 已启动 ✓'
+      console.log('[Avatar3D] Web DeviceMotion 启动成功')
+      return
+    }
+
+    // 如果 Web API 不可用，尝试 Capacitor Motion（Android 等平台）
+    console.log('[Avatar3D] 检查 Motion 插件:', typeof Motion)
+    if (typeof Motion !== 'undefined' && Motion.addListener) {
+      try {
+        debugInfo.value.status = '请求 Capacitor 权限...'
+        console.log('[Avatar3D] 调用 Motion.requestPermissions')
+        await Motion.requestPermissions?.()
+        console.log('[Avatar3D] 权限请求完成，添加监听器')
+        await Motion.addListener('accel', handleCapacitorMotion)
+        motionListening = true
+        debugInfo.value.status = 'Capacitor Motion 已启动'
+        console.log('[Avatar3D] Capacitor Motion 启动成功')
+        return
+      } catch (e) {
+        console.log('[Avatar3D] Capacitor Motion 失败:', e)
+        debugInfo.value.status = 'Capacitor 失败: ' + String(e)
+      }
+    }
+
+    debugInfo.value.status = '设备不支持运动感应'
+    console.log('[Avatar3D] 无可用的运动 API')
+  } catch (error) {
+    console.error('[Avatar3D] 启动运动监听失败:', error)
+    debugInfo.value.status = '启动失败: ' + String(error)
+  }
+}
+
+function stopMotionListening() {
+  if (!motionListening) return
+
+  try {
+    if (typeof Motion !== 'undefined' && Motion.removeAllListeners) {
+      Motion.removeAllListeners()
+    }
+    window.removeEventListener('devicemotion', handleDeviceMotion)
+    motionListening = false
+    if (shakeTimeout) {
+      clearTimeout(shakeTimeout)
+      shakeTimeout = null
+    }
+  } catch (error) {
+    console.error('[Avatar3D] 停止运动监听失败:', error)
+  }
+}
+
 function animate() {
   frameId = requestAnimationFrame(animate)
 
@@ -327,6 +531,27 @@ function animate() {
   bodyGroup.scale.set(breathScale, breathScale, breathScale)
   headGroup.position.y = Math.sin(time) * 0.05
 
+  // Blinking - 随机眨眼，每 2-5 秒眨一次
+  const now = Date.now()
+  if (leftEye && rightEye) {
+    if (now - lastBlinkTime > 2000 + Math.random() * 3000) {
+      lastBlinkTime = now
+    }
+    // 眨眼动画：在 150ms 内完成闭眼-睁眼
+    const blinkProgress = (now - lastBlinkTime) / 150
+    if (blinkProgress < 1) {
+      // 眨眼中：Y轴缩放从1→0.1→1
+      const blinkScale = blinkProgress < 0.5
+        ? 1 - blinkProgress * 1.8  // 闭眼
+        : 0.1 + (blinkProgress - 0.5) * 1.8  // 睁眼
+      leftEye.scale.y = Math.max(0.1, blinkScale)
+      rightEye.scale.y = Math.max(0.1, blinkScale)
+    } else {
+      leftEye.scale.y = 1
+      rightEye.scale.y = 1
+    }
+  }
+
   // Listening: ears wiggle (slower, gentler movement)
   if (props.isListening) {
     earsGroup.children.forEach((ear, i) => {
@@ -334,11 +559,11 @@ function animate() {
     })
   }
 
-  // Speaking: mouth moves
+  // Speaking: mouth moves (调慢速度：18 → 8)
   if (props.isSpeaking) {
-    const mouthS = 1 + Math.sin(time * 18) * 0.3
+    const mouthS = 1 + Math.sin(time * 8) * 0.25
     mouthGroup.scale.set(1, mouthS, 1)
-    mouthGroup.position.y = -Math.sin(time * 18) * 0.03
+    mouthGroup.position.y = -Math.sin(time * 8) * 0.02
   } else {
     mouthGroup.scale.lerp(new THREE.Vector3(1, 1, 1), 0.1)
     mouthGroup.position.y = 0
@@ -347,6 +572,14 @@ function animate() {
   // Thinking: head wobble
   if (props.isThinking) {
     mascotGroup.rotation.y += Math.sin(time * 4) * 0.06
+  }
+
+  // 运动感应：晃动时的缩放效果
+  if (motionScale.value !== 1) {
+    const targetScale = motionScale.value
+    mascotGroup.scale.lerp(new THREE.Vector3(targetScale, targetScale, targetScale), 0.1)
+  } else {
+    mascotGroup.scale.lerp(new THREE.Vector3(1, 1, 1), 0.05)
   }
 
   renderer.render(scene, camera)
@@ -359,6 +592,7 @@ function cleanup() {
   }
   window.removeEventListener('mousemove', onMouseMove)
   window.removeEventListener('touchmove', onTouchMove)
+  stopMotionListening()
   if (renderer && containerRef.value) {
     containerRef.value.removeChild(renderer.domElement)
     renderer.dispose()
@@ -379,6 +613,7 @@ onMounted(() => {
   window.addEventListener('mousemove', onMouseMove)
   window.addEventListener('touchmove', onTouchMove, { passive: true })
   animate()
+  // iOS 需要用户手势触发权限，点击小宠物即可启动
 })
 
 onUnmounted(() => {
@@ -390,6 +625,22 @@ watch(() => props.type, (newType) => {
   if (newType) {
     setupMascot(newType)
   }
+})
+
+// 点击切换运动感应
+async function toggleMotionListening() {
+  if (motionListening) {
+    stopMotionListening()
+  } else {
+    await startMotionListening()
+  }
+}
+
+// 暴露调试信息
+defineExpose({
+  debugInfo,
+  startMotionListening,
+  stopMotionListening
 })
 </script>
 
@@ -406,6 +657,7 @@ watch(() => props.type, (newType) => {
       ref="containerRef"
       class="flex items-center justify-center cursor-grab active:cursor-grabbing transform-gpu transition-all duration-500 hover:scale-[1.02]"
       :style="{ width: `${size || 280}px`, height: `${size || 280}px` }"
+      @click="toggleMotionListening"
     />
 
     <!-- Status bar -->
@@ -434,5 +686,6 @@ watch(() => props.type, (newType) => {
         </span>
       </div>
     </div>
+
   </div>
 </template>

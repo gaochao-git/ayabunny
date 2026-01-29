@@ -2,6 +2,8 @@
  * 背景音乐管理 API
  */
 
+import { getApiUrl } from './config'
+
 export interface BGMItem {
   id: string       // 文件名（如 "sweet-dreams.mp3" 或 "custom/xxx.mp3"）
   name: string     // 显示名称
@@ -12,7 +14,7 @@ export interface BGMItem {
  * 获取 BGM 列表
  */
 export async function getBGMList(): Promise<BGMItem[]> {
-  const response = await fetch('/api/bgm')
+  const response = await fetch(getApiUrl('/api/bgm'))
   if (!response.ok) {
     throw new Error(`HTTP error! status: ${response.status}`)
   }
@@ -30,7 +32,7 @@ export async function uploadBGM(file: File, name?: string): Promise<BGMItem> {
     formData.append('name', name)
   }
 
-  const response = await fetch('/api/bgm/upload', {
+  const response = await fetch(getApiUrl('/api/bgm/upload'), {
     method: 'POST',
     body: formData,
   })
@@ -47,7 +49,7 @@ export async function uploadBGM(file: File, name?: string): Promise<BGMItem> {
  * 删除自定义 BGM
  */
 export async function deleteBGM(id: string): Promise<void> {
-  const response = await fetch(`/api/bgm/${encodeURIComponent(id)}`, {
+  const response = await fetch(getApiUrl(`/api/bgm/${encodeURIComponent(id)}`), {
     method: 'DELETE',
   })
 
@@ -64,5 +66,5 @@ export function getBGMUrl(id: string): string {
   if (!id) return ''
   // 预设 BGM 在 /bgm/ 目录
   // 自定义 BGM 在 /bgm/custom/ 目录
-  return `/bgm/${id}`
+  return getApiUrl(`/bgm/${id}`)
 }

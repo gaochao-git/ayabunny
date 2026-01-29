@@ -7,6 +7,7 @@
  */
 
 import { ref, onUnmounted } from 'vue'
+import { VAD_WS_URL } from '@/api/config'
 
 export interface SileroVADOptions {
   /** Silero VAD WebSocket 地址 */
@@ -28,10 +29,10 @@ export interface SileroVADOptions {
 }
 
 export function useSileroVAD(options: SileroVADOptions = {}) {
-  // 默认 WebSocket URL：通过当前 host 的 /ws/vad 端点
-  const defaultWsUrl = typeof window !== 'undefined'
+  // 默认 WebSocket URL：使用环境配置或当前 host 的 /ws/vad 端点
+  const defaultWsUrl = VAD_WS_URL || (typeof window !== 'undefined'
     ? `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/ws/vad`
-    : 'ws://127.0.0.1:6002/ws/vad'
+    : 'ws://127.0.0.1:6002/ws/vad')
 
   const {
     wsUrl = defaultWsUrl,

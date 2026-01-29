@@ -2,6 +2,8 @@
  * 视频分析 API
  */
 
+import { getApiUrl } from './config'
+
 export interface VideoEvent {
   type: 'token' | 'info' | 'done' | 'error'
   content?: string
@@ -24,7 +26,7 @@ export interface AnalyzeFramesOptions {
  * 分析单帧图片（SSE 流式）
  */
 export async function* analyzeFrame(options: AnalyzeFrameOptions): AsyncGenerator<VideoEvent> {
-  const response = await fetch('/api/video/analyze-frame', {
+  const response = await fetch(getApiUrl('/api/video/analyze-frame'), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -48,7 +50,7 @@ export async function* analyzeFrame(options: AnalyzeFrameOptions): AsyncGenerato
  * 分析多帧图片（SSE 流式）
  */
 export async function* analyzeFrames(options: AnalyzeFramesOptions): AsyncGenerator<VideoEvent> {
-  const response = await fetch('/api/video/analyze-frames', {
+  const response = await fetch(getApiUrl('/api/video/analyze-frames'), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -81,7 +83,7 @@ export async function* analyzeVideo(
   formData.append('question', question)
   formData.append('interval', interval.toString())
 
-  const response = await fetch('/api/video/analyze-video', {
+  const response = await fetch(getApiUrl('/api/video/analyze-video'), {
     method: 'POST',
     body: formData,
     signal,
