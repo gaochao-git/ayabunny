@@ -55,6 +55,9 @@ onUnmounted(() => {
 const inputText = ref('')
 const showSettings = ref(false)
 const isTranscribing = ref(false) // 是否正在语音转文字
+const isVoiceInputMode = ref(false) // 是否为语音输入模式（按住说话）
+const isPushToTalkRecording = ref(false) // 是否正在按住录音
+const pushToTalkCancelled = ref(false) // 是否取消发送（上滑取消）
 // 附件状态（图片或视频）
 const pendingMedia = ref<{ type: 'image' | 'video'; data: string; blob?: Blob } | null>(null)
 const mediaInputRef = ref<HTMLInputElement | null>(null)
@@ -556,7 +559,7 @@ function triggerMediaSelect() {
   mediaInputRef.value?.click()
 }
 
-// 语音转文字（填充到输入框）
+// 语音转文字（填充到输入框）- 旧的点击录音方式
 async function toggleTranscribe() {
   if (transcribeRecorder.isRecording.value) {
     // 停止录音，进行识别
@@ -580,6 +583,174 @@ async function toggleTranscribe() {
     } catch (error) {
       console.error('Failed to start transcribe recording:', error)
     }
+  }
+}
+
+// ============ 按住说话模式 ============
+let pushToTalkStartY = 0
+let pushToTalkStartTime = 0
+let pushToTalkPointerId: number | null = null  // 追踪当前指针ID
+const MIN_HOLD_DURATION = 300  // 最小按住时间（毫秒）
+
+// 触觉反馈
+function vibrate(pattern: number | number[] = 10) {
+  if ('vibrate' in navigator) {
+    navigator.vibrate(pattern)
+  }
+}
+
+// 开始按住说话（使用 PointerEvent 统一处理触摸和鼠标）
+let recordingStartPromise: Promise<void> | null = null
+
+async function startPushToTalk(e: PointerEvent) {
+  if (isTranscribing.value || isPushToTalkRecording.value || chat.isLoading.value) return
+
+  // 记录指针ID，用于追踪这个特定的触摸
+  pushToTalkPointerId = e.pointerId
+
+  // 捕获指针，确保后续事件都能收到
+  const target = e.target as HTMLElement
+  target.setPointerCapture(e.pointerId)
+
+  // 触觉反馈
+  vibrate(15)
+
+  pushToTalkCancelled.value = false
+  pushToTalkStartY = e.clientY
+  pushToTalkStartTime = Date.now()
+
+  // 立即显示按住状态
+  isPushToTalkRecording.value = true
+
+  console.log('[PushToTalk] 开始，pointerId:', e.pointerId)
+
+  // 启动录音（保存 Promise 以便等待）
+  recordingStartPromise = transcribeRecorder.startRecording()
+  recordingStartPromise
+    .then(() => {
+      console.log('[PushToTalk] 录音已启动')
+    })
+    .catch((error) => {
+      console.error('[PushToTalk] 录音启动失败:', error)
+      cleanupPushToTalk(target)
+      recordingStartPromise = null
+    })
+}
+
+// 清理状态
+function cleanupPushToTalk(target?: HTMLElement) {
+  // 释放指针捕获
+  if (target && pushToTalkPointerId !== null) {
+    try {
+      target.releasePointerCapture(pushToTalkPointerId)
+    } catch {
+      // 忽略错误（可能已经释放）
+    }
+  }
+  isPushToTalkRecording.value = false
+  pushToTalkCancelled.value = false
+  pushToTalkPointerId = null
+}
+
+// 移动时检测是否上滑取消
+function movePushToTalk(e: PointerEvent) {
+  // 只处理同一个指针
+  if (!isPushToTalkRecording.value || e.pointerId !== pushToTalkPointerId) return
+
+  const deltaY = pushToTalkStartY - e.clientY
+  pushToTalkCancelled.value = deltaY > 50
+}
+
+// 松手结束录音
+async function endPushToTalk(e: PointerEvent) {
+  // 只处理同一个指针
+  if (!isPushToTalkRecording.value || e.pointerId !== pushToTalkPointerId) return
+
+  console.log('[PushToTalk] 结束，pointerId:', e.pointerId)
+
+  // 触觉反馈
+  vibrate(10)
+
+  const holdDuration = Date.now() - pushToTalkStartTime
+  const wasCancelled = pushToTalkCancelled.value
+
+  // 立即清理状态
+  cleanupPushToTalk(e.target as HTMLElement)
+
+  // 等待录音启动完成
+  if (recordingStartPromise) {
+    try {
+      await recordingStartPromise
+    } catch {
+      console.log('[PushToTalk] 录音启动失败，取消')
+      recordingStartPromise = null
+      return
+    }
+    recordingStartPromise = null
+  }
+
+  // 按住时间太短，视为误触
+  if (holdDuration < MIN_HOLD_DURATION) {
+    console.log('[PushToTalk] 误触，取消')
+    if (transcribeRecorder.isRecording.value) {
+      await transcribeRecorder.stopRecording()
+    }
+    return
+  }
+
+  try {
+    // 确认录音器正在录音
+    if (!transcribeRecorder.isRecording.value) {
+      console.log('[PushToTalk] 录音器未在录音')
+      return
+    }
+
+    // 停止录音
+    const audioBlob = await transcribeRecorder.stopRecording()
+    console.log('[PushToTalk] 录音大小:', audioBlob.size)
+
+    if (wasCancelled) {
+      console.log('[PushToTalk] 上滑取消')
+      return
+    }
+
+    // 识别
+    isTranscribing.value = true
+    const result = await transcribe(audioBlob)
+    isTranscribing.value = false
+
+    if (result.success && result.text) {
+      console.log('[PushToTalk] 识别:', result.text)
+      const frameImage = isCameraOn.value && videoCapture.isPreviewActive.value
+        ? videoCapture.captureFrame()
+        : null
+      const image = frameImage ? `data:image/jpeg;base64,${frameImage}` : undefined
+      chat.send(result.text, undefined, image)
+    }
+  } catch (error) {
+    console.error('[PushToTalk] 失败:', error)
+    isTranscribing.value = false
+  }
+}
+
+// 指针取消（如来电中断等）
+async function cancelPushToTalk(e: PointerEvent) {
+  if (!isPushToTalkRecording.value || e.pointerId !== pushToTalkPointerId) return
+  console.log('[PushToTalk] 取消，pointerId:', e.pointerId)
+  cleanupPushToTalk(e.target as HTMLElement)
+
+  // 等待录音启动完成后再停止
+  if (recordingStartPromise) {
+    try {
+      await recordingStartPromise
+    } catch {
+      // 忽略
+    }
+    recordingStartPromise = null
+  }
+
+  if (transcribeRecorder.isRecording.value) {
+    transcribeRecorder.stopRecording()
   }
 }
 
@@ -993,101 +1164,201 @@ watch(cameraPreviewRef, async (el, oldEl) => {
             @change="handleMediaSelect"
           />
 
-          <!-- 输入框（按钮全部在内部） -->
-          <div class="flex items-center bg-gray-50 border border-gray-200 rounded-full px-2 py-1.5 focus-within:ring-2 focus-within:ring-pink-400 focus-within:border-transparent">
-            <!-- 左侧按钮：附件、摄像头 -->
-            <div class="flex items-center flex-shrink-0">
-              <button
-                @click="triggerMediaSelect"
-                :disabled="chat.isLoading.value || isAnalyzingMedia"
-                class="w-7 h-7 rounded-full flex items-center justify-center transition-colors bg-green-500 hover:bg-green-600 text-white disabled:bg-gray-200 disabled:text-gray-400"
-                title="选择图片/视频"
-              >
-                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
-                </svg>
-              </button>
+          <!-- ===== 语音输入模式：按住说话 ===== -->
+          <template v-if="isVoiceInputMode">
+            <!-- 录音中提示 -->
+            <div v-if="isPushToTalkRecording" class="text-center text-sm mb-2" :class="pushToTalkCancelled ? 'text-red-500' : 'text-gray-500'">
+              {{ pushToTalkCancelled ? '松开取消' : '松手发送，上移取消' }}
+            </div>
+
+            <div class="flex items-center bg-gray-50 border border-gray-200 rounded-full px-3 py-2">
+              <!-- 左侧：摄像头按钮 -->
               <button
                 v-if="videoCapture.isSupported.value"
                 @click="toggleCamera"
-                :disabled="chat.isLoading.value"
+                :disabled="isPushToTalkRecording"
                 :class="[
-                  'w-7 h-7 rounded-full flex items-center justify-center transition-colors ml-0.5',
-                  isCameraOn
-                    ? 'bg-blue-500 hover:bg-blue-600 text-white'
-                    : 'bg-gray-200 hover:bg-gray-300 text-gray-500'
+                  'w-8 h-8 rounded-full flex items-center justify-center transition-colors flex-shrink-0',
+                  isCameraOn ? 'text-blue-500' : 'text-gray-400'
                 ]"
-                :title="isCameraOn ? '关闭摄像头' : '开启摄像头'"
               >
-                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
                 </svg>
               </button>
-            </div>
 
-            <!-- 输入框 -->
-            <input
-              v-model="inputText"
-              @keydown="handleKeydown"
-              :disabled="chat.isLoading.value"
-              placeholder="输入消息..."
-              class="flex-1 min-w-0 bg-transparent border-none outline-none text-sm text-gray-700 placeholder-gray-400 disabled:text-gray-400 mx-2"
-              inputmode="text"
-              autocomplete="off"
-            />
-
-            <!-- 右侧按钮：语音、通话、发送 -->
-            <div class="flex items-center flex-shrink-0">
+              <!-- 中间：按住说话按钮 / 停止按钮 -->
+              <!-- AI 回复中：显示停止按钮 -->
               <button
-                @click="toggleTranscribe"
-                :disabled="isTranscribing"
-                :class="[
-                  'w-7 h-7 rounded-full flex items-center justify-center transition-colors',
-                  transcribeRecorder.isRecording.value
-                    ? 'bg-red-500 text-white animate-pulse'
-                    : 'bg-pink-500 hover:bg-pink-600 text-white'
-                ]"
-                :title="transcribeRecorder.isRecording.value ? '停止录音' : '语音输入'"
+                v-if="chat.isLoading.value"
+                @click="chat.abort()"
+                class="flex-1 py-2 mx-2 rounded-full text-center text-sm font-medium bg-blue-500 text-white animate-breathing flex items-center justify-center gap-2"
               >
-                <svg v-if="isTranscribing" class="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
-                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
-                <svg v-else class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
-                </svg>
-              </button>
-              <button
-                @click="toggleCall"
-                class="w-7 h-7 rounded-full flex items-center justify-center transition-colors ml-0.5 bg-gray-200 hover:bg-gray-300 text-gray-500"
-                :title="isCameraOn ? '视频通话' : '语音通话'"
-              >
-                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
-                </svg>
-              </button>
-              <button
-                @click="chat.isLoading.value ? chat.abort() : handleSend()"
-                :disabled="!chat.isLoading.value && !canSend"
-                :class="[
-                  'w-7 h-7 rounded-full flex items-center justify-center transition-colors ml-0.5',
-                  chat.isLoading.value
-                    ? 'bg-blue-500 hover:bg-blue-600 text-white animate-breathing'
-                    : canSend
-                      ? 'bg-blue-500 hover:bg-blue-600 text-white'
-                      : 'bg-gray-200 text-gray-400 cursor-not-allowed'
-                ]"
-                :title="chat.isLoading.value ? '停止生成' : '发送'"
-              >
-                <svg v-if="chat.isLoading.value" class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
+                <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
                   <rect x="6" y="6" width="12" height="12" rx="2" />
                 </svg>
-                <svg v-else class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 10l7-7m0 0l7 7m-7-7v18" />
+                <span>停止回复</span>
+              </button>
+              <!-- 正常状态：按住说话 -->
+              <button
+                v-else
+                @pointerdown.prevent="startPushToTalk"
+                @pointermove="movePushToTalk"
+                @pointerup="endPushToTalk"
+                @pointercancel="cancelPushToTalk"
+                :disabled="isTranscribing"
+                :class="[
+                  'flex-1 py-2 mx-2 rounded-full text-sm font-medium transition-all select-none touch-none flex items-center justify-center',
+                  isPushToTalkRecording
+                    ? (pushToTalkCancelled ? 'bg-red-500 text-white' : 'bg-blue-500 text-white')
+                    : 'text-gray-600 hover:bg-gray-100'
+                ]"
+              >
+                <span v-if="isTranscribing" class="flex items-center justify-center gap-2">
+                  <svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  识别中...
+                </span>
+                <span v-else-if="isPushToTalkRecording" class="relative flex items-center justify-center h-5">
+                  <!-- 波纹扩散效果 -->
+                  <span class="absolute flex items-center justify-center">
+                    <span class="ripple-ring ripple-ring-1"></span>
+                    <span class="ripple-ring ripple-ring-2"></span>
+                    <span class="ripple-ring ripple-ring-3"></span>
+                  </span>
+                  <!-- 麦克风图标 -->
+                  <svg class="w-5 h-5 relative z-10" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/>
+                    <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
+                  </svg>
+                </span>
+                <span v-else class="flex items-center justify-center gap-1.5">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                  </svg>
+                  按住说话
+                </span>
+              </button>
+
+              <!-- 右侧：切换到文字输入、更多 -->
+              <button
+                @click="isVoiceInputMode = false"
+                class="w-8 h-8 rounded-full flex items-center justify-center text-gray-400 hover:text-gray-600 flex-shrink-0"
+                title="切换到文字输入"
+              >
+                <!-- 键盘图标 -->
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <rect x="2" y="6" width="20" height="12" rx="2" stroke-width="1.5" />
+                  <circle cx="6" cy="10" r="1" fill="currentColor" />
+                  <circle cx="10" cy="10" r="1" fill="currentColor" />
+                  <circle cx="14" cy="10" r="1" fill="currentColor" />
+                  <circle cx="18" cy="10" r="1" fill="currentColor" />
+                  <rect x="6" y="13" width="12" height="2" rx="0.5" fill="currentColor" />
+                </svg>
+              </button>
+              <button
+                @click="triggerMediaSelect"
+                class="w-8 h-8 rounded-full flex items-center justify-center text-gray-400 hover:text-gray-600 flex-shrink-0"
+                title="选择图片/视频"
+              >
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
                 </svg>
               </button>
             </div>
-          </div>
+          </template>
+
+          <!-- ===== 文字输入模式 ===== -->
+          <template v-else>
+            <div class="flex items-center bg-gray-50 border border-gray-200 rounded-full px-2 py-1.5 focus-within:ring-2 focus-within:ring-pink-400 focus-within:border-transparent">
+              <!-- 左侧按钮：附件、摄像头 -->
+              <div class="flex items-center flex-shrink-0">
+                <button
+                  @click="triggerMediaSelect"
+                  :disabled="chat.isLoading.value || isAnalyzingMedia"
+                  class="w-7 h-7 rounded-full flex items-center justify-center transition-colors bg-green-500 hover:bg-green-600 text-white disabled:bg-gray-200 disabled:text-gray-400"
+                  title="选择图片/视频"
+                >
+                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                  </svg>
+                </button>
+                <button
+                  v-if="videoCapture.isSupported.value"
+                  @click="toggleCamera"
+                  :disabled="chat.isLoading.value"
+                  :class="[
+                    'w-7 h-7 rounded-full flex items-center justify-center transition-colors ml-0.5',
+                    isCameraOn
+                      ? 'bg-blue-500 hover:bg-blue-600 text-white'
+                      : 'bg-gray-200 hover:bg-gray-300 text-gray-500'
+                  ]"
+                  :title="isCameraOn ? '关闭摄像头' : '开启摄像头'"
+                >
+                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                  </svg>
+                </button>
+              </div>
+
+              <!-- 输入框 -->
+              <input
+                v-model="inputText"
+                @keydown="handleKeydown"
+                :disabled="chat.isLoading.value"
+                placeholder="输入消息..."
+                class="flex-1 min-w-0 bg-transparent border-none outline-none text-sm text-gray-700 placeholder-gray-400 disabled:text-gray-400 mx-2"
+                inputmode="text"
+                autocomplete="off"
+              />
+
+              <!-- 右侧按钮：语音模式切换、通话、发送 -->
+              <div class="flex items-center flex-shrink-0">
+                <!-- 切换到语音输入模式 -->
+                <button
+                  @click="isVoiceInputMode = true"
+                  class="w-7 h-7 rounded-full flex items-center justify-center transition-colors bg-gray-200 hover:bg-gray-300 text-gray-500"
+                  title="按住说话"
+                >
+                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                  </svg>
+                </button>
+                <button
+                  @click="toggleCall"
+                  class="w-7 h-7 rounded-full flex items-center justify-center transition-colors ml-0.5 bg-gray-200 hover:bg-gray-300 text-gray-500"
+                  :title="isCameraOn ? '视频通话' : '语音通话'"
+                >
+                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
+                  </svg>
+                </button>
+                <button
+                  @click="chat.isLoading.value ? chat.abort() : handleSend()"
+                  :disabled="!chat.isLoading.value && !canSend"
+                  :class="[
+                    'w-7 h-7 rounded-full flex items-center justify-center transition-colors ml-0.5',
+                    chat.isLoading.value
+                      ? 'bg-blue-500 hover:bg-blue-600 text-white animate-breathing'
+                      : canSend
+                        ? 'bg-blue-500 hover:bg-blue-600 text-white'
+                        : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                  ]"
+                  :title="chat.isLoading.value ? '停止生成' : '发送'"
+                >
+                  <svg v-if="chat.isLoading.value" class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
+                    <rect x="6" y="6" width="12" height="12" rx="2" />
+                  </svg>
+                  <svg v-else class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 10l7-7m0 0l7 7m-7-7v18" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+          </template>
         </template>
       </footer>
       </div>
@@ -1232,5 +1503,52 @@ watch(cameraPreviewRef, async (el, oldEl) => {
 
 .animate-breathing {
   animation: breathing 1.5s ease-in-out infinite;
+}
+
+/* 禁用触摸默认行为，防止长按弹出菜单等 */
+.touch-none {
+  touch-action: none;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* 录音波纹扩散效果 */
+.ripple-ring {
+  position: absolute;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.6);
+  animation: ripple-expand 1.5s ease-out infinite;
+}
+
+.ripple-ring-1 {
+  width: 30px;
+  height: 30px;
+  animation-delay: 0s;
+}
+
+.ripple-ring-2 {
+  width: 30px;
+  height: 30px;
+  animation-delay: 0.5s;
+}
+
+.ripple-ring-3 {
+  width: 30px;
+  height: 30px;
+  animation-delay: 1s;
+}
+
+@keyframes ripple-expand {
+  0% {
+    width: 30px;
+    height: 30px;
+    opacity: 0.8;
+  }
+  100% {
+    width: 80px;
+    height: 80px;
+    opacity: 0;
+  }
 }
 </style>
