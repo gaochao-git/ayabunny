@@ -98,7 +98,7 @@ export function useBGM(options: BGMOptions = {}) {
 
   /**
    * 在用户交互时解锁音频（移动端必须）
-   * 预加载一个真实的 BGM 文件，确保后续可以播放
+   * 使用静音音频解锁，不播放真实 BGM
    */
   function unlock(): void {
     if (unlockedAudio) {
@@ -106,20 +106,22 @@ export function useBGM(options: BGMOptions = {}) {
       return
     }
 
-    console.log('[BGM] 尝试解锁音频（预加载 BGM）...')
+    console.log('[BGM] 尝试解锁音频...')
 
-    // 随机选择一个 BGM 预加载
-    const track = BGM_LIST[Math.floor(Math.random() * BGM_LIST.length)]
-    const audio = new Audio(track.url)
-    audio.loop = true
-    audio.volume = 0.001  // 几乎静音
+    // 创建一个 Audio 对象用于解锁
+    const audio = new Audio()
+    audio.volume = 0
+    audio.muted = true
+
+    // 使用静音的 WAV 数据解锁（不播放真实 BGM）
+    audio.src = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA'
 
     audio.play().then(() => {
-      // 立即暂停，但保留这个已解锁的 audio 对象
       audio.pause()
-      audio.currentTime = 0
+      audio.muted = false
+      // 保留这个已解锁的 audio 对象，后续播放时再设置真实 src
       unlockedAudio = audio
-      console.log('[BGM] 音频已解锁，预加载:', track.title)
+      console.log('[BGM] 音频已解锁')
       // 清除挂起的 BGM，不自动播放
       pendingBgmId = null
     }).catch(e => {

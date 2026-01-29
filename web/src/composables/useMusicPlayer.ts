@@ -117,20 +117,26 @@ export function useMusicPlayer(options: MusicPlayerOptions = {}) {
     // 获取或创建 Audio 对象
     const a = getAudio()
 
-    // 用静音播放来解锁
+    // 用静音播放来解锁（使用短的静音 wav）
     const originalVolume = a.volume
     a.volume = 0
+    a.muted = true
+
+    // 静音的 WAV 文件（44 bytes, 1 sample, silent）
     a.src = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA'
 
     a.play().then(() => {
+      a.pause()
+      a.muted = false
+      a.volume = originalVolume
+      // 不要设置 src = ''，会触发 onerror
+      // 后续播放时会重新设置 src
       isUnlocked.value = true
       console.log('[Music] 音频播放已解锁')
-      a.pause()
-      a.volume = originalVolume
-      a.src = ''
     }).catch(e => {
-      console.log('[Music] 解锁失败（可能需要更多用户交互）:', e.message)
+      a.muted = false
       a.volume = originalVolume
+      console.log('[Music] 解锁失败（可能需要更多用户交互）:', e.message)
     })
   }
 

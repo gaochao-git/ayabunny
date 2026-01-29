@@ -9,9 +9,10 @@ import { useFunASRVAD } from '@/composables/useFunASRVAD'
 import { useBGM } from '@/composables/useBGM'
 import { useMusicPlayer } from '@/composables/useMusicPlayer'
 import { useVideoCapture } from '@/composables/useVideoCapture'
+import { useVoiceCall, CallState } from '@/composables/useVoiceCall'
 import { useSettingsStore, BACKGROUNDS, AVATARS, type AvatarType } from '@/stores/settings'
 import { transcribe } from '@/api/asr'
-import { analyzeFrame, analyzeFrames, analyzeVideo } from '@/api/video'
+import { analyzeVideo } from '@/api/video'
 import { FUNASR_WS_URL } from '@/api/config'
 import ChatArea from '@/components/ChatArea.vue'
 import RightPanel from '@/components/RightPanel.vue'
@@ -50,16 +51,10 @@ onUnmounted(() => {
   window.removeEventListener('beforeunload', handleBeforeUnload)
 })
 
-// 用于前向引用的变量
-let startCallRecording: () => Promise<void>
-let ttsPlayer: ReturnType<typeof useTTSPlayer>
-
 // 状态
 const inputText = ref('')
 const showSettings = ref(false)
-const isInCall = ref(false)       // 是否在通话中
 const isTranscribing = ref(false) // 是否正在语音转文字
-const isProcessingCall = ref(false) // 是否正在处理通话（防止并发）
 // 附件状态（图片或视频）
 const pendingMedia = ref<{ type: 'image' | 'video'; data: string; blob?: Blob } | null>(null)
 const mediaInputRef = ref<HTMLInputElement | null>(null)
@@ -68,7 +63,9 @@ const mediaInputRef = ref<HTMLInputElement | null>(null)
 const isCameraOn = ref(false)
 const cameraPreviewRef = ref<HTMLVideoElement | null>(null)
 const isAvatarMain = ref(true)  // AI角色是否为主画面（true=AI主/摄像头辅，false=摄像头主/AI辅）
+const isCameraMinimized = ref(false)  // 非通话时摄像头是否最小化到右上角
 const isAnalyzingMedia = ref(false)  // 是否正在分析媒体
+const isMuted = ref(false)  // 是否静音（通话中）
 
 // 视频捕获
 const videoCapture = useVideoCapture({
@@ -100,7 +97,7 @@ const backgroundStyle = computed(() => ({
   background: `linear-gradient(135deg, ${currentBackground.value.colors[0]} 0%, ${currentBackground.value.colors[1]} 50%, ${currentBackground.value.colors[2]} 100%)`
 }))
 
-// 唤醒词 ASR 识别函数
+// 唤醒词 ASR 识别函数（用于关键词打断模式）
 async function transcribeForWakeWord(blob: Blob): Promise<string> {
   try {
     const result = await transcribe(blob)
@@ -110,29 +107,25 @@ async function transcribeForWakeWord(blob: Blob): Promise<string> {
   }
 }
 
-// VAD 语音打断检测（通话全程使用）
-// 打断词/唤醒词列表（动态包含助手名字）
-// 注意：只有 TTS 播放中才需要唤醒词验证，正常对话时直接识别
-const getWakeWords = () => {
-  // 只有 TTS 播放中才需要唤醒词（打断模式）
-  // 正常对话时返回空数组（直接模式）
+// 打断词列表（只有 TTS 播放时才需要唤醒词验证）
+const getWakeWords = (): string[] => {
+  // 只有 TTS 播放中才需要唤醒词（用于打断）
+  // 正常对话时返回空数组，VAD 检测到语音就直接触发
   if (!ttsPlayer?.isPlaying?.value) {
-    return []  // 直接模式：不需要唤醒词验证
+    return []
   }
 
-  // 实时打断模式：不需要关键词，直接打断
+  // 实时打断模式：不需要关键词，检测到语音就打断
   if (settings.vadInstantInterrupt) {
-    return []  // 返回空数组，VAD 检测到语音就立即触发
+    return []
   }
 
   // 关键词打断模式：需要说唤醒词才能打断 TTS
   const name = settings.assistantName || '小智'
   const aliases = settings.assistantAliases || []
   return [
-    // 助手名字及其同音词
     name,
     ...aliases,
-    // 打断词
     '等等', '等一下', '等会', '等会儿',
     '停', '停一下', '停停', '暂停',
     '不对', '不是', '不要', '不用',
@@ -142,94 +135,69 @@ const getWakeWords = () => {
   ]
 }
 
-// VAD 检测到语音开始
+// VAD 语音检测回调（由 voiceCall 状态机处理）
+// 注意：voiceCall 稍后初始化，这里用函数引用
+let voiceCall: ReturnType<typeof useVoiceCall>
+
 function handleVADSpeechStart() {
   console.log('[VAD] 检测到用户说话')
 
-  // 场景1：TTS 正在播放 → 打断 TTS，开始录音
-  if (ttsPlayer.isPlaying.value) {
-    console.log('[VAD] 打断 TTS')
-    ttsPlayer.stop()
-    // 延迟一点再开始录音，避免捕获 TTS 尾音
-    setTimeout(() => {
-      if (isInCall.value && !callRecorder.isRecording.value && !isProcessingCall.value) {
-        startCallRecording()
-      }
-    }, 200)
+  // 静音时忽略语音检测
+  if (isMuted.value) {
+    console.log('[VAD] 已静音，忽略')
     return
   }
 
-  // 场景2：儿歌正在播放（TTS 不播放）→ 降低音量，开始录音
+  // 儿歌播放中降低音量
   if (musicPlayer.isPlaying.value) {
-    console.log('[VAD] 儿歌播放中，开始录音')
-    musicPlayer.duck()  // 降低儿歌音量，方便用户说话
+    musicPlayer.duck()
   }
-
-  // 开始录音（通用逻辑）
-  if (isInCall.value && !callRecorder.isRecording.value && !isProcessingCall.value) {
-    startCallRecording()
-  }
+  // 通知状态机
+  voiceCall?.onVoiceDetected()
 }
 
-// VAD 检测到语音结束
 function handleVADSpeechEnd() {
   console.log('[VAD] 检测到语音结束')
-
-  // 正常对话时（TTS 不播放），不用 VAD 的 onSpeechEnd
-  // 而是让 useAudioRecorder 的静音检测来判断（用户可配置 silenceDuration）
-  // 这样用户思考时停顿一下不会立即发送
-  if (!ttsPlayer?.isPlaying?.value) {
-    console.log('[VAD] 正常对话模式，等待静音检测')
-    return
-  }
-
-  // 打断模式下，VAD 的 onSpeechEnd 不需要特殊处理
-  // 打断逻辑在 wakeWordTimeout 和 verifyWakeWord 里处理
+  // VAD 的 onSpeechEnd 不直接触发发送
+  // 由 useAudioRecorder 的静音检测来判断（用户可配置 silenceDuration）
 }
 
 // WebRTC VAD（基于频谱分析）
 const webrtcVAD = useWebRTCVAD({
   ignoreTime: () => settings.vadIgnoreTime,
-  wakeWordTimeout: () => settings.vadWakeWordTimeout,  // 快速检测时长
+  wakeWordTimeout: () => settings.vadWakeWordTimeout,
   wakeWords: getWakeWords,
   transcribeFn: transcribeForWakeWord,
-  onWakeWordDetected: (word) => {
-    console.log(`[WebRTC VAD] 中断词匹配: "${word}"`)
-  },
+  onWakeWordDetected: (word) => console.log(`[WebRTC VAD] 中断词: "${word}"`),
   onSpeechStart: handleVADSpeechStart,
   onSpeechEnd: handleVADSpeechEnd,
 })
 
 // Silero VAD（内置后端，通过 /ws/vad 访问）
-// 构建 WebSocket URL：开发环境通过 Vite 代理，生产环境直接连后端
 const getVadWsUrl = () => {
   const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
   return `${protocol}//${location.host}/ws/vad`
 }
 const sileroVAD = useSileroVAD({
-  wsUrl: getVadWsUrl(),  // 通过 Vite 代理或直连后端
-  backend: () => settings.vadType,  // 动态获取 VAD 后端类型
-  wakeWords: getWakeWords,  // 中断词列表（动态获取，包含助手名字）
-  transcribeFn: transcribeForWakeWord,  // ASR 识别函数
+  wsUrl: getVadWsUrl(),
+  backend: () => settings.vadType,
+  wakeWords: getWakeWords,
+  transcribeFn: transcribeForWakeWord,
   ignoreTime: () => settings.vadIgnoreTime,
-  onWakeWordDetected: (word, text) => {
-    console.log(`[Silero VAD] 中断词匹配: "${word}" (原文: "${text}")`)
-  },
+  onWakeWordDetected: (word, text) => console.log(`[Silero VAD] 中断词: "${word}"`),
   onSpeechStart: handleVADSpeechStart,
   onSpeechEnd: handleVADSpeechEnd,
 })
 
-// FunASR VAD（基于服务端 AI 模型 + 中断词验证）
+// FunASR VAD（基于服务端 AI 模型）
 const funasrVAD = useFunASRVAD({
-  wsUrl: FUNASR_WS_URL,  // FunASR 流式服务 WebSocket 地址
+  wsUrl: FUNASR_WS_URL,
   ignoreTime: () => settings.vadIgnoreTime,
-  wakeWords: getWakeWords,  // 中断词列表（动态获取，包含助手名字）
-  transcribeFn: transcribeForWakeWord,  // ASR 识别函数
+  wakeWords: getWakeWords,
+  transcribeFn: transcribeForWakeWord,
   onSpeechStart: handleVADSpeechStart,
   onSpeechEnd: handleVADSpeechEnd,
-  onWakeWordDetected: (word, text) => {
-    console.log(`[FunASR VAD] 中断词匹配: "${word}" (原文: "${text}")`)
-  },
+  onWakeWordDetected: (word, text) => console.log(`[FunASR VAD] 中断词: "${word}"`),
 })
 
 // 统一 VAD 接口
@@ -283,11 +251,10 @@ watch(() => settings.vadType, (newType, oldType) => {
 const callRecorder = useAudioRecorder({
   silenceThreshold: () => settings.silenceThreshold,
   silenceDuration: () => settings.silenceDuration,
-  onSilenceDetected: async () => {
-    console.log('[Call] 检测到静音，自动停止录音...')
-    // 防止并发：检查是否正在处理、是否在通话中、是否还在录音
-    if (settings.autoSend && callRecorder.isRecording.value && isInCall.value && !isProcessingCall.value) {
-      await handleCallRecordingStop()
+  onSilenceDetected: () => {
+    console.log('[Call] 检测到静音')
+    if (settings.autoSend) {
+      voiceCall?.onSilenceDetected()
     }
   },
 })
@@ -295,19 +262,15 @@ const callRecorder = useAudioRecorder({
 // 监听录音状态，录音时降低儿歌音量
 watch(() => callRecorder.isRecording.value, (recording) => {
   if (musicPlayer.isPlaying.value) {
-    if (recording) {
-      musicPlayer.duck()  // 录音开始，降低儿歌音量
-    } else {
-      musicPlayer.unduck()  // 录音停止，恢复儿歌音量
-    }
+    recording ? musicPlayer.duck() : musicPlayer.unduck()
   }
 })
 
 // 语音转文字录音器（不自动停止，手动控制）
 const transcribeRecorder = useAudioRecorder({})
 
-// TTS 播放器（必须在 vad 和 callRecorder 之后初始化，因为回调中会使用它们）
-ttsPlayer = useTTSPlayer({
+// TTS 播放器
+const ttsPlayer = useTTSPlayer({
   gain: () => settings.ttsGain,
   model: () => settings.ttsModel,
   voice: () => settings.ttsVoice,
@@ -315,8 +278,8 @@ ttsPlayer = useTTSPlayer({
   speed: () => settings.ttsSpeed,
   onPlayStart: async () => {
     console.log('[TTS] 开始播放')
-    // 通话中，播放时启动 VAD 检测打断
-    if (settings.vadEnabled && isInCall.value) {
+    // 通话中启动 VAD 检测打断
+    if (settings.vadEnabled && voiceCall?.isInCall.value) {
       try {
         await vad.start()
       } catch (error) {
@@ -326,20 +289,32 @@ ttsPlayer = useTTSPlayer({
   },
   onPlayEnd: () => {
     console.log('[TTS] 播放结束')
-    // 通话中继续 VAD 监听
-    if (isInCall.value && !callRecorder.isRecording.value && !isProcessingCall.value) {
-      if (settings.vadEnabled) {
-        // VAD 启用时，继续监听（不需要 stop 再 start，保持运行）
-        console.log('[Call] TTS 结束，继续 VAD 监听')
-        // 如果 VAD 没在运行，重新启动
-        if (!vad.isActive.value) {
-          vad.start()
-        }
-      } else {
-        // VAD 未启用，直接开始录音
-        startCallRecording()
-      }
+    // 只有在 LLM 处理完成后才触发 TTS_ENDED
+    // 否则可能是 TTS 队列暂时为空，LLM 还在输出新句子
+    if (!chat.isLoading.value) {
+      voiceCall?.onTtsEnded()
     }
+  },
+})
+
+// ============ 语音通话状态机 ============
+voiceCall = useVoiceCall({
+  vad,
+  recorder: callRecorder,
+  tts: ttsPlayer,
+  chat,
+  transcribe,
+  vadEnabled: () => settings.vadEnabled,
+  ttsEnabled: () => settings.ttsEnabled,
+  captureFrame: () => {
+    if (isCameraOn.value && videoCapture.isPreviewActive.value) {
+      return videoCapture.captureFrame()
+    }
+    return null
+  },
+  unlockAudio: async () => {
+    bgm.unlock()
+    musicPlayer.unlock()
   },
 })
 
@@ -364,7 +339,7 @@ watch(() => ttsPlayer.isPlaying.value, (playing) => {
 
 // 监听儿歌播放状态变化
 watch(() => musicPlayer.isPlaying.value, (playing) => {
-  if (!isInCall.value) return
+  if (!voiceCall.isInCall.value) return
 
   if (playing) {
     // 儿歌开始播放，停止当前录音，启用 VAD 监听
@@ -374,13 +349,9 @@ watch(() => musicPlayer.isPlaying.value, (playing) => {
     }
     vad.start()
   } else {
-    // 儿歌停止，如果没有在录音也没有 TTS 播放，开始录音
+    // 儿歌停止
     console.log('[Call] 儿歌停止')
     vad.stop()
-    if (!callRecorder.isRecording.value && !ttsPlayer.isPlaying.value && !isProcessingCall.value) {
-      console.log('[Call] 恢复录音')
-      startCallRecording()
-    }
   }
 })
 
@@ -432,32 +403,31 @@ watch(() => chat.musicAction.value, async (action) => {
 // 计算属性
 const canSend = computed(() => (inputText.value.trim() || pendingMedia.value) && !chat.isLoading.value && !isAnalyzingMedia.value)
 
-// 状态文字（通话中显示）
+// 状态文字（通话中显示）- 使用状态机的状态
 const statusText = computed(() => {
   if (sileroVAD.isLoading.value || funasrVAD.isConnecting.value) return '加载VAD模型...'
-  if (callRecorder.isRecording.value) return '正在听...'
-  // TTS 播放时，检查 VAD 状态
-  if (ttsPlayer.isPlaying.value || ttsPlayer.isPending.value) {
-    // 正在验证中断词
-    if (funasrVAD.isCheckingWakeWord.value || webrtcVAD.isCheckingWakeWord.value) {
-      return '验证中断词...'
-    }
-    // VAD 检测到语音
-    if (funasrVAD.isSpeaking.value || sileroVAD.isSpeaking.value || webrtcVAD.isSpeaking.value) {
-      return '检测到语音...'
-    }
-    return '正在说...'
-  }
-  if (chat.isLoading.value) return '思考中...'
-  if (isProcessingCall.value) return '处理中...'
-  // VAD 监听中
-  if (vad.isActive.value) {
-    if (funasrVAD.isSpeaking.value || sileroVAD.isSpeaking.value || webrtcVAD.isSpeaking.value) {
+
+  switch (voiceCall.state.value) {
+    case CallState.LISTENING:
+      if (funasrVAD.isSpeaking.value || sileroVAD.isSpeaking.value || webrtcVAD.isSpeaking.value) {
+        return '检测到语音...'
+      }
+      return '等待说话...'
+    case CallState.RECORDING:
       return '正在听...'
-    }
-    return '等待说话...'
+    case CallState.PROCESSING:
+      return '思考中...'
+    case CallState.SPEAKING:
+      if (funasrVAD.isCheckingWakeWord.value || webrtcVAD.isCheckingWakeWord.value) {
+        return '验证中断词...'
+      }
+      if (funasrVAD.isSpeaking.value || sileroVAD.isSpeaking.value || webrtcVAD.isSpeaking.value) {
+        return '检测到语音...'
+      }
+      return '正在说...'
+    default:
+      return ''
   }
-  return '等待说话...'
 })
 
 // ============ 文字模式 ============
@@ -613,148 +583,21 @@ async function toggleTranscribe() {
   }
 }
 
-// ============ 通话模式 ============
+// ============ 通话模式（使用状态机） ============
 
-// 开始/结束通话
 function toggleCall() {
-  if (isInCall.value) {
-    endCall()
+  if (voiceCall.isInCall.value) {
+    voiceCall.endCall()
+    isMuted.value = false  // 挂断时重置静音状态
   } else {
-    startCall()
+    voiceCall.startCall()
   }
 }
 
-// 开始通话（摄像头开=视频通话，关=语音通话）
-async function startCall() {
-  // 移动端需要在用户交互时解锁音频
-  await ttsPlayer.unlock()
-  bgm.unlock()
-  musicPlayer.unlock()
-  isInCall.value = true
-
-  console.log('[Call] 开始通话，摄像头:', isCameraOn.value ? '开启' : '关闭')
-
-  // 启动 VAD 监听，检测到语音再开始录音
-  if (settings.vadEnabled) {
-    console.log('[Call] 启动 VAD 监听')
-    await vad.start()
-  } else {
-    // VAD 未启用时，直接开始录音（兼容旧模式）
-    await startCallRecording()
-  }
-}
-
-// 结束通话
-function endCall() {
-  console.log('[Call] 结束通话')
-  isInCall.value = false
-  isProcessingCall.value = false  // 重置处理状态
-
-  // 停止通话相关活动
-  chat.abort()  // 取消 LLM 请求
-  if (callRecorder.isRecording.value) {
-    callRecorder.stopRecording()
-  }
-  ttsPlayer.stop()  // 会清空 TTS 队列
-  vad.stop()
-
-  // 注意：不关闭摄像头，让用户自行控制
-  // 注意：不停止儿歌，让用户可以继续听
-}
-
-// 开始通话录音
-startCallRecording = async function() {
-  // 防止重复开始录音
-  if (callRecorder.isRecording.value) {
-    console.log('[Call] 已在录音中，跳过')
-    return
-  }
-  // 防止在处理中开始录音
-  if (isProcessingCall.value) {
-    console.log('[Call] 正在处理中，跳过录音')
-    return
-  }
-  // 防止 TTS 播放时开始录音（避免录到 TTS 声音）
-  if (ttsPlayer.isPlaying.value) {
-    console.log('[Call] TTS 正在播放，跳过录音')
-    return
-  }
-
-  try {
-    console.log('[Call] 开始录音...')
-    await callRecorder.startRecording()
-  } catch (error) {
-    console.error('[Call] 开始录音失败:', error)
-  }
-}
-
-// 处理通话录音停止（识别并发送，带TTS）
-async function handleCallRecordingStop() {
-  // 防止并发
-  if (isProcessingCall.value) {
-    console.log('[Call] 已在处理中，跳过')
-    return
-  }
-
-  isProcessingCall.value = true
-  console.log('[Call] 开始处理录音...')
-
-  try {
-    const audioBlob = await callRecorder.stopRecording()
-    const result = await transcribe(audioBlob)
-
-    if (result.success && result.text) {
-      console.log('[Call] ASR 识别结果:', result.text)
-
-      // 视频模式：捕获当前帧，让 AI 看到画面
-      let frameImage: string | undefined
-      if (isCameraOn.value && videoCapture.isPreviewActive.value) {
-        const frame = videoCapture.captureFrame()
-        if (frame) {
-          frameImage = `data:image/jpeg;base64,${frame}`
-          console.log('[VideoCall] 附加当前视频帧')
-        }
-      }
-
-      // 通话模式：流式 TTS
-      const onSentence = settings.ttsEnabled
-        ? (sentence: string) => {
-            // 检查是否已取消（用户打断或挂断）
-            if (!isInCall.value) return
-            console.log('[Call] 流式 TTS 句子:', sentence)
-            ttsPlayer.speak(sentence)
-          }
-        : undefined
-
-      await chat.send(result.text, onSentence, frameImage)
-
-      // chat.send 完成后，检查是否需要启动录音
-      // 条件：TTS 没有启用，或 TTS 没有在播放/待播放
-      if (isInCall.value) {
-        if (!settings.ttsEnabled) {
-          // TTS 未启用，直接继续录音
-          console.log('[Call] TTS 未启用，继续录音')
-          startCallRecording()
-        } else if (!ttsPlayer.isPlaying.value && !ttsPlayer.isPending.value) {
-          // TTS 启用但没有内容在播放，可能是内容被过滤了，直接继续录音
-          console.log('[Call] TTS 无待播放内容，继续录音')
-          startCallRecording()
-        }
-        // 如果 TTS 正在播放/待播放，会在 onPlayEnd 回调中继续录音
-      }
-    } else if (isInCall.value) {
-      // 识别失败或无内容，继续录音
-      console.log('[Call] ASR 无结果，继续录音')
-      startCallRecording()
-    }
-  } catch (error) {
-    console.error('[Call] 处理录音错误:', error)
-    if (isInCall.value) {
-      startCallRecording()
-    }
-  } finally {
-    isProcessingCall.value = false
-  }
+// 切换静音（通话中）
+function toggleMute() {
+  isMuted.value = !isMuted.value
+  console.log('[Call] 静音:', isMuted.value)
 }
 
 // 键盘事件
@@ -892,7 +735,7 @@ watch(cameraPreviewRef, async (el, oldEl) => {
       <!-- 主内容区 - 根据模式显示不同内容 -->
       <div class="flex-1 min-h-0 flex flex-col">
         <!-- 通话中：显示角色头像和/或摄像头预览 -->
-        <template v-if="isInCall">
+        <template v-if="voiceCall.isInCall.value">
           <div class="flex-1 flex flex-col items-center justify-center pb-16 bg-gradient-to-b from-white/50 to-white relative">
 
             <!-- 摄像头视频（单一元素，通过CSS切换位置） -->
@@ -943,9 +786,9 @@ watch(cameraPreviewRef, async (el, oldEl) => {
             >
               <Avatar3D
                 :type="mascotType"
-                :is-listening="callRecorder.isRecording.value"
-                :is-thinking="chat.isLoading.value"
-                :is-speaking="ttsPlayer.isPlaying.value"
+                :is-listening="voiceCall.isRecording.value"
+                :is-thinking="voiceCall.isProcessing.value"
+                :is-speaking="voiceCall.isSpeaking.value"
                 :size="isCameraOn && !isAvatarMain ? 70 : 280"
               />
               <!-- 小窗时：切换提示图标 -->
@@ -963,216 +806,289 @@ watch(cameraPreviewRef, async (el, oldEl) => {
               <span class="w-2.5 h-2.5 rounded-full bg-green-400" title="已连接"></span>
               <span
                 class="w-2.5 h-2.5 rounded-full transition-colors"
-                :class="callRecorder.isRecording.value ? 'bg-pink-400 animate-pulse' : 'bg-gray-300'"
+                :class="voiceCall.isRecording.value ? 'bg-pink-400 animate-pulse' : 'bg-gray-300'"
                 title="录音状态"
               ></span>
               <span
                 class="w-2.5 h-2.5 rounded-full transition-colors"
-                :class="ttsPlayer.isPlaying.value ? 'bg-orange-400 animate-pulse' : 'bg-gray-300'"
+                :class="voiceCall.isSpeaking.value ? 'bg-orange-400 animate-pulse' : 'bg-gray-300'"
                 title="播放状态"
               ></span>
               <span
                 class="w-2.5 h-2.5 rounded-full transition-colors"
-                :class="(funasrVAD.isActive.value || sileroVAD.isActive.value) ? 'bg-blue-400 animate-pulse' : 'bg-gray-300'"
+                :class="voiceCall.isListening.value ? 'bg-blue-400 animate-pulse' : 'bg-gray-300'"
                 title="VAD检测"
               ></span>
             </div>
 
-            <!-- 音量显示（通话中） -->
+            <!-- 状态文字和音量显示 -->
             <div class="mt-4 text-xs text-gray-400">
-              音量: {{ callRecorder.audioLevel.value }}
+              {{ statusText }} | 音量: {{ callRecorder.audioLevel.value }}
             </div>
           </div>
         </template>
 
         <!-- 非通话时：显示聊天消息或欢迎界面 -->
         <template v-else>
-          <!-- 有消息时显示聊天区域 -->
-          <ChatArea
-            v-if="chat.messages.value.length > 0 || chat.isLoading.value"
-            :messages="chat.messages.value"
-            :streaming-content="chat.streamingContent.value"
-            :is-loading="chat.isLoading.value"
-            :current-skill="chat.currentSkill.value"
-            :tool-calls="chat.toolCalls.value"
-            class="flex-1 min-h-0"
-          />
-          <!-- 无消息时显示欢迎界面 -->
-          <div v-else class="flex-1 flex flex-col items-center justify-center text-center px-8">
-            <Avatar3D
-              :type="mascotType"
-              :size="200"
-              class="mb-2"
+          <div class="flex-1 min-h-0 flex flex-col relative">
+            <!-- 摄像头预览（右上角，大/小切换） -->
+            <div
+              v-if="isCameraOn"
+              class="absolute top-2 right-2 z-20 cursor-pointer transition-all duration-300 ease-in-out"
+              :class="isCameraMinimized ? 'w-24 h-32' : 'w-44 h-60'"
+              @click="isCameraMinimized = !isCameraMinimized"
+            >
+              <div class="w-full h-full rounded-xl overflow-hidden shadow-lg bg-black border-2 border-white hover:scale-105 transition-transform">
+                <video
+                  ref="cameraPreviewRef"
+                  autoplay
+                  muted
+                  playsinline
+                  class="w-full h-full object-cover"
+                  :style="{ transform: videoCapture.isFrontCamera.value ? 'scaleX(-1)' : 'none' }"
+                ></video>
+                <!-- 缩放图标 -->
+                <div class="absolute inset-0 flex items-center justify-center bg-black/20 opacity-0 hover:opacity-100 transition-opacity">
+                  <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path v-if="isCameraMinimized" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+                    <path v-else stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 9V4.5M9 9H4.5M9 9L3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5m0-4.5l5.25 5.25" />
+                  </svg>
+                </div>
+              </div>
+              <!-- 切换摄像头按钮 -->
+              <button
+                @click.stop="videoCapture.switchCamera()"
+                :class="[
+                  'absolute bottom-1.5 right-1.5 bg-black/50 text-white rounded-full flex items-center justify-center hover:bg-black/70',
+                  isCameraMinimized ? 'w-6 h-6' : 'w-8 h-8'
+                ]"
+              >
+                <svg :class="isCameraMinimized ? 'w-3.5 h-3.5' : 'w-4 h-4'" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+              </button>
+            </div>
+
+            <!-- 聊天区域或欢迎界面 -->
+            <ChatArea
+              v-if="chat.messages.value.length > 0 || chat.isLoading.value"
+              :messages="chat.messages.value"
+              :streaming-content="chat.streamingContent.value"
+              :is-loading="chat.isLoading.value"
+              :current-skill="chat.currentSkill.value"
+              :tool-calls="chat.toolCalls.value"
+              class="flex-1 min-h-0"
             />
-            <h2 class="text-xl font-semibold text-gray-700 mb-2">你好，我是{{ settings.assistantName || '小智' }}</h2>
-            <p class="text-gray-500 text-sm mb-6">
-              点击通话按钮开始对话，或输入文字发送
-            </p>
+            <!-- 无消息时显示欢迎界面 -->
+            <div v-else class="flex-1 flex flex-col items-center justify-center text-center px-8">
+              <Avatar3D
+                :type="mascotType"
+                :size="200"
+                class="mb-2"
+              />
+              <h2 class="text-xl font-semibold text-gray-700 mb-2">你好，我是{{ settings.assistantName || '小智' }}</h2>
+              <p class="text-gray-500 text-sm mb-6">
+                {{ isCameraOn ? '发送消息时会自动捕获画面' : '点击通话按钮开始对话，或输入文字发送' }}
+              </p>
+            </div>
           </div>
         </template>
       </div>
 
       <!-- 底部输入区 -->
       <footer class="flex-shrink-0 px-4 py-3 md:pb-4 bg-white safe-bottom">
-        <!-- 提示文字 -->
-        <div v-if="isInCall" class="text-center text-xs text-gray-400 mb-3">
-          说完自动识别 | 点击头像挂断
-        </div>
-
-        <!-- 待发送媒体预览 -->
-        <div v-if="pendingMedia" class="mb-2 flex items-center gap-2 px-2">
-          <div class="relative">
-            <img v-if="pendingMedia.type === 'image'" :src="pendingMedia.data" class="w-16 h-16 object-cover rounded-lg border" />
-            <video v-else :src="pendingMedia.data" class="w-16 h-16 object-cover rounded-lg border" />
-            <button
-              @click="clearPendingMedia"
-              class="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center text-xs hover:bg-red-600"
-            >
-              <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-          </div>
-          <span class="text-xs text-gray-400">{{ pendingMedia.type === 'image' ? '图片' : '视频' }}已选择</span>
-        </div>
-
-        <!-- 摄像头预览（非通话时） -->
-        <div v-if="isCameraOn && !isInCall" class="mb-2 flex items-center gap-2 px-2">
-          <div class="relative">
-            <video
-              ref="cameraPreviewRef"
-              autoplay
-              muted
-              playsinline
-              class="w-20 h-16 object-cover rounded-lg border bg-black"
-              :style="{ transform: videoCapture.isFrontCamera.value ? 'scaleX(-1)' : 'none' }"
-            ></video>
-            <!-- 切换摄像头按钮 -->
-            <button
-              @click="videoCapture.switchCamera()"
-              class="absolute -top-1 -right-1 w-5 h-5 bg-gray-600 hover:bg-gray-700 text-white rounded-full flex items-center justify-center transition-colors"
-              title="切换摄像头"
-            >
-              <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-              </svg>
-            </button>
-          </div>
-          <span class="text-xs text-gray-400">{{ videoCapture.isFrontCamera.value ? '前置' : '后置' }}摄像头</span>
-        </div>
-
-        <!-- 隐藏的媒体输入（不设置 capture，让用户选择拍照或从相册选择） -->
-        <input
-          ref="mediaInputRef"
-          type="file"
-          accept="image/*,video/*"
-          class="hidden"
-          @change="handleMediaSelect"
-        />
-
-        <!-- 输入框（按钮全部在内部） -->
-        <div class="flex items-center bg-gray-50 border border-gray-200 rounded-full px-2 py-1.5 focus-within:ring-2 focus-within:ring-pink-400 focus-within:border-transparent">
-          <!-- 左侧按钮：附件、摄像头 -->
-          <div class="flex items-center flex-shrink-0">
-            <button
-              @click="triggerMediaSelect"
-              :disabled="chat.isLoading.value || isAnalyzingMedia"
-              class="w-7 h-7 rounded-full flex items-center justify-center transition-colors bg-green-500 hover:bg-green-600 text-white disabled:bg-gray-200 disabled:text-gray-400"
-              title="选择图片/视频"
-            >
-              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
-              </svg>
-            </button>
-            <button
-              v-if="videoCapture.isSupported.value"
-              @click="toggleCamera"
-              :disabled="chat.isLoading.value"
-              :class="[
-                'w-7 h-7 rounded-full flex items-center justify-center transition-colors ml-0.5',
-                isCameraOn
-                  ? 'bg-blue-500 hover:bg-blue-600 text-white'
-                  : 'bg-gray-200 hover:bg-gray-300 text-gray-500'
-              ]"
-              :title="isCameraOn ? '关闭摄像头' : '开启摄像头'"
-            >
-              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-              </svg>
-            </button>
+        <!-- ========== 通话模式：简洁的 3 个大按钮 ========== -->
+        <template v-if="voiceCall.isInCall.value">
+          <!-- 状态提示 -->
+          <div class="text-center text-sm text-gray-500 mb-4">
+            {{ statusText }}
           </div>
 
-          <!-- 输入框 -->
+          <!-- 3 个大按钮 -->
+          <div class="flex items-center justify-center gap-8">
+            <!-- 静音按钮 -->
+            <div class="flex flex-col items-center gap-1">
+              <button
+                @click="toggleMute"
+                :class="[
+                  'w-14 h-14 rounded-full flex items-center justify-center transition-all shadow-md',
+                  isMuted
+                    ? 'bg-red-100 text-red-500 hover:bg-red-200'
+                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                ]"
+              >
+                <svg v-if="isMuted" class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2" />
+                </svg>
+                <svg v-else class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                </svg>
+              </button>
+              <span class="text-xs text-gray-500">{{ isMuted ? '取消静音' : '静音' }}</span>
+            </div>
+
+            <!-- 挂断按钮 -->
+            <div class="flex flex-col items-center gap-1">
+              <button
+                @click="toggleCall"
+                class="w-16 h-16 rounded-full flex items-center justify-center bg-red-500 hover:bg-red-600 text-white transition-all shadow-lg"
+              >
+                <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 8l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2M5 3a2 2 0 00-2 2v1c0 8.284 6.716 15 15 15h1a2 2 0 002-2v-3.28a1 1 0 00-.684-.948l-4.493-1.498a1 1 0 00-1.21.502l-1.13 2.257a11.042 11.042 0 01-5.516-5.517l2.257-1.128a1 1 0 00.502-1.21L9.228 3.683A1 1 0 008.279 3H5z" />
+                </svg>
+              </button>
+              <span class="text-xs text-gray-500">挂断</span>
+            </div>
+
+            <!-- 摄像头按钮 -->
+            <div class="flex flex-col items-center gap-1">
+              <button
+                @click="toggleCamera"
+                :class="[
+                  'w-14 h-14 rounded-full flex items-center justify-center transition-all shadow-md',
+                  isCameraOn
+                    ? 'bg-blue-100 text-blue-500 hover:bg-blue-200'
+                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                ]"
+              >
+                <svg v-if="isCameraOn" class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                </svg>
+                <svg v-else class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 3l18 18" />
+                </svg>
+              </button>
+              <span class="text-xs text-gray-500">{{ isCameraOn ? '关闭' : '摄像头' }}</span>
+            </div>
+          </div>
+        </template>
+
+        <!-- ========== 非通话模式：输入框和按钮 ========== -->
+        <template v-else>
+          <!-- 待发送媒体预览 -->
+          <div v-if="pendingMedia" class="mb-2 flex items-center gap-2 px-2">
+            <div class="relative">
+              <img v-if="pendingMedia.type === 'image'" :src="pendingMedia.data" class="w-16 h-16 object-cover rounded-lg border" />
+              <video v-else :src="pendingMedia.data" class="w-16 h-16 object-cover rounded-lg border" />
+              <button
+                @click="clearPendingMedia"
+                class="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center text-xs hover:bg-red-600"
+              >
+                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <span class="text-xs text-gray-400">{{ pendingMedia.type === 'image' ? '图片' : '视频' }}已选择</span>
+          </div>
+
+          <!-- 隐藏的媒体输入 -->
           <input
-            v-model="inputText"
-            @keydown="handleKeydown"
-            :disabled="chat.isLoading.value"
-            placeholder="输入消息..."
-            class="flex-1 min-w-0 bg-transparent border-none outline-none text-sm text-gray-700 placeholder-gray-400 disabled:text-gray-400 mx-2"
-            inputmode="text"
-            autocomplete="off"
+            ref="mediaInputRef"
+            type="file"
+            accept="image/*,video/*"
+            class="hidden"
+            @change="handleMediaSelect"
           />
 
-          <!-- 右侧按钮：语音、通话、发送 -->
-          <div class="flex items-center flex-shrink-0">
-            <button
-              @click="toggleTranscribe"
-              :disabled="isTranscribing"
-              :class="[
-                'w-7 h-7 rounded-full flex items-center justify-center transition-colors',
-                transcribeRecorder.isRecording.value
-                  ? 'bg-red-500 text-white animate-pulse'
-                  : 'bg-pink-500 hover:bg-pink-600 text-white'
-              ]"
-              :title="transcribeRecorder.isRecording.value ? '停止录音' : '语音输入'"
-            >
-              <svg v-if="isTranscribing" class="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
-                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-              </svg>
-              <svg v-else class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
-              </svg>
-            </button>
-            <button
-              @click="toggleCall"
-              :class="[
-                'w-7 h-7 rounded-full flex items-center justify-center transition-colors ml-0.5',
-                isInCall
-                  ? 'bg-red-500 hover:bg-red-600 text-white'
-                  : 'bg-gray-200 hover:bg-gray-300 text-gray-500'
-              ]"
-              :title="isInCall ? '挂断' : (isCameraOn ? '视频通话' : '语音通话')"
-            >
-              <svg v-if="isInCall" class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 8l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2M5 3a2 2 0 00-2 2v1c0 8.284 6.716 15 15 15h1a2 2 0 002-2v-3.28a1 1 0 00-.684-.948l-4.493-1.498a1 1 0 00-1.21.502l-1.13 2.257a11.042 11.042 0 01-5.516-5.517l2.257-1.128a1 1 0 00.502-1.21L9.228 3.683A1 1 0 008.279 3H5z" />
-              </svg>
-              <svg v-else class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
-              </svg>
-            </button>
-            <button
-              @click="chat.isLoading.value ? chat.abort() : handleSend()"
-              :disabled="!chat.isLoading.value && !canSend"
-              :class="[
-                'w-7 h-7 rounded-full flex items-center justify-center transition-colors ml-0.5',
-                chat.isLoading.value
-                  ? 'bg-blue-500 hover:bg-blue-600 text-white animate-breathing'
-                  : canSend
+          <!-- 输入框（按钮全部在内部） -->
+          <div class="flex items-center bg-gray-50 border border-gray-200 rounded-full px-2 py-1.5 focus-within:ring-2 focus-within:ring-pink-400 focus-within:border-transparent">
+            <!-- 左侧按钮：附件、摄像头 -->
+            <div class="flex items-center flex-shrink-0">
+              <button
+                @click="triggerMediaSelect"
+                :disabled="chat.isLoading.value || isAnalyzingMedia"
+                class="w-7 h-7 rounded-full flex items-center justify-center transition-colors bg-green-500 hover:bg-green-600 text-white disabled:bg-gray-200 disabled:text-gray-400"
+                title="选择图片/视频"
+              >
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                </svg>
+              </button>
+              <button
+                v-if="videoCapture.isSupported.value"
+                @click="toggleCamera"
+                :disabled="chat.isLoading.value"
+                :class="[
+                  'w-7 h-7 rounded-full flex items-center justify-center transition-colors ml-0.5',
+                  isCameraOn
                     ? 'bg-blue-500 hover:bg-blue-600 text-white'
-                    : 'bg-gray-200 text-gray-400 cursor-not-allowed'
-              ]"
-              :title="chat.isLoading.value ? '停止生成' : '发送'"
-            >
-              <svg v-if="chat.isLoading.value" class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
-                <rect x="6" y="6" width="12" height="12" rx="2" />
-              </svg>
-              <svg v-else class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 10l7-7m0 0l7 7m-7-7v18" />
-              </svg>
-            </button>
+                    : 'bg-gray-200 hover:bg-gray-300 text-gray-500'
+                ]"
+                :title="isCameraOn ? '关闭摄像头' : '开启摄像头'"
+              >
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                </svg>
+              </button>
+            </div>
+
+            <!-- 输入框 -->
+            <input
+              v-model="inputText"
+              @keydown="handleKeydown"
+              :disabled="chat.isLoading.value"
+              placeholder="输入消息..."
+              class="flex-1 min-w-0 bg-transparent border-none outline-none text-sm text-gray-700 placeholder-gray-400 disabled:text-gray-400 mx-2"
+              inputmode="text"
+              autocomplete="off"
+            />
+
+            <!-- 右侧按钮：语音、通话、发送 -->
+            <div class="flex items-center flex-shrink-0">
+              <button
+                @click="toggleTranscribe"
+                :disabled="isTranscribing"
+                :class="[
+                  'w-7 h-7 rounded-full flex items-center justify-center transition-colors',
+                  transcribeRecorder.isRecording.value
+                    ? 'bg-red-500 text-white animate-pulse'
+                    : 'bg-pink-500 hover:bg-pink-600 text-white'
+                ]"
+                :title="transcribeRecorder.isRecording.value ? '停止录音' : '语音输入'"
+              >
+                <svg v-if="isTranscribing" class="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                <svg v-else class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                </svg>
+              </button>
+              <button
+                @click="toggleCall"
+                class="w-7 h-7 rounded-full flex items-center justify-center transition-colors ml-0.5 bg-gray-200 hover:bg-gray-300 text-gray-500"
+                :title="isCameraOn ? '视频通话' : '语音通话'"
+              >
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
+                </svg>
+              </button>
+              <button
+                @click="chat.isLoading.value ? chat.abort() : handleSend()"
+                :disabled="!chat.isLoading.value && !canSend"
+                :class="[
+                  'w-7 h-7 rounded-full flex items-center justify-center transition-colors ml-0.5',
+                  chat.isLoading.value
+                    ? 'bg-blue-500 hover:bg-blue-600 text-white animate-breathing'
+                    : canSend
+                      ? 'bg-blue-500 hover:bg-blue-600 text-white'
+                      : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                ]"
+                :title="chat.isLoading.value ? '停止生成' : '发送'"
+              >
+                <svg v-if="chat.isLoading.value" class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
+                  <rect x="6" y="6" width="12" height="12" rx="2" />
+                </svg>
+                <svg v-else class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 10l7-7m0 0l7 7m-7-7v18" />
+                </svg>
+              </button>
+            </div>
           </div>
-        </div>
+        </template>
       </footer>
       </div>
 
